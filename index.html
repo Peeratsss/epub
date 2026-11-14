@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>My EPUB Reader</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="light">
+
+  <!-- Library view -->
+  <section id="library">
+    <header class="bar">
+      <h1>My Library</h1>
+      <label class="btn primary">
+        + Add EPUB
+        <input id="file-input" type="file" accept=".epub,application/epub+zip" multiple hidden>
+      </label>
+    </header>
+    <div id="drop-hint">Drop .epub files anywhere on this page, or use “Add EPUB”.</div>
+    <div id="grid"></div>
+  </section>
+
+  <!-- Reader view -->
+  <section id="reader" hidden>
+    <header class="bar">
+      <button id="back" class="btn" title="Back to library">← Library</button>
+      <div id="book-title" class="title"></div>
+      <div class="tools">
+        <button id="toc-btn" class="btn" title="Table of contents">☰</button>
+        <button id="font-down" class="btn" title="Smaller text">A−</button>
+        <button id="font-up" class="btn" title="Larger text">A+</button>
+        <select id="theme" class="btn" title="Theme">
+          <option value="light">Light</option>
+          <option value="sepia">Sepia</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+    </header>
+
+    <div id="stage">
+      <aside id="toc" hidden></aside>
+      <button id="prev" class="nav" aria-label="Previous page">‹</button>
+      <div id="viewer"></div>
+      <button id="next" class="nav" aria-label="Next page">›</button>
+    </div>
+
+    <footer class="bar foot">
+      <span id="progress-text">0%</span>
+      <input id="progress" type="range" min="0" max="100" value="0">
+    </footer>
+  </section>
+
+  <div id="toast" hidden></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
