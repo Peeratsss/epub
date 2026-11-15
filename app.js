@@ -903,10 +903,6 @@
 
   function handleKey(e) {
     if (e.key === "Escape" && !$("search-dialog").hidden) { closeSearch(); return; }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
-      if (mode && !$("reader").hidden) { e.preventDefault(); e.stopPropagation(); openSearch(); }
-      return;
-    }
     if (!mode || $("reader").hidden || !$("modal").hidden || !$("search-dialog").hidden) return;
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     if (e.key === "ArrowRight" || e.key === "PageDown") goNext();
@@ -958,6 +954,13 @@
   $("progress").addEventListener("change", (e) => {
     if (mode === "pdf") pdfGo(+e.target.value);
     else if (book && book.locations.length()) rendition.display(book.locations.cfiFromPercentage(e.target.value / 100));
+  });
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f" && mode && !$("reader").hidden) {
+      e.preventDefault();
+      e.stopPropagation();
+      openSearch();
+    }
   });
   document.addEventListener("keyup", handleKey);
 
