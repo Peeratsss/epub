@@ -311,6 +311,50 @@
     return total ? total + "s" : "0m";
   }
 
+
+  function renderLibraryStats() {
+    const entries = Object.values(readingStats.books || {});
+    const today = statsDateKey();
+    const totalSeconds = entries.reduce((sum, item) => sum + (Number(item.totalSeconds) || 0), 0);
+    const totalPages = entries.reduce((sum, item) => sum + (Array.isArray(item.seenPages) ? item.seenPages.length : 0), 0);
+    const todaySeconds = entries.reduce((sum, item) => sum + (Number(item.daily && item.daily[today] && item.daily[today].seconds) || 0), 0);
+    const todayPages = entries.reduce((sum, item) => sum + (item.daily && item.daily[today] && Array.isArray(item.daily[today].pages) ? item.daily[today].pages.length : 0), 0);
+
+    $("library-stats-total-time").textContent = formatReadingDuration(totalSeconds);
+    $("library-stats-total-pages").textContent = String(totalPages);
+    $("library-stats-today-time").textContent = formatReadingDuration(todaySeconds);
+    $("library-stats-today-pages").textContent = String(todayPages);
+
+    const daily = [];
+    for (let offset = 6; offset >= 0; offset--) {
+      const date = new Date();
+      date.setDate(date.getDate() - offset);
+      const key = statsDateKey(date.getTime());
+      const seconds = entries.reduce((sum, item) => sum + (Number(item.daily && item.daily[key] && item.daily[key].seconds) || 0), 0);
+      const pages = entries.reduce((sum, item) => sum + (item.daily && item.daily[key] && Array.isArray(item.daily[key].pages) ? item.daily[key].pages.length : 0), 0);
+      daily.push({ date, seconds, pages });
+    }
+    const maxSeconds = Math.max(1, ...daily.map((day) => day.seconds));
+    const dailyList = $("library-stats-daily");
+    dailyList.innerHTML = "";
+    daily.forEach((day, index) => {
+      const item = document.createElement("div");
+      item.className = "library-stats-day";
+      const barWrap = document.createElement("div");
+      barWrap.className = "library-stats-bar-wrap";
+      const bar = document.createElement("i");
+      bar.style.height = Math.max(day.seconds ? 8 : 3, Math.round(day.seconds / maxSeconds * 100)) + "%";
+      barWrap.appendChild(bar);
+      const value = document.createElement("strong");
+      value.textContent = day.seconds ? formatReadingDuration(day.seconds) : "—";
+      const label = document.createElement("span");
+      label.textContent = index === 6 ? "Today" : day.date.toLocaleDateString(undefined, { weekday: "short" });
+      item.title = day.date.toLocaleDateString() + ": " + formatReadingDuration(day.seconds) + ", " + day.pages + " page(s)";
+      item.append(barWrap, value, label);
+      dailyList.appendChild(item);
+    });
+  }
+
   function renderReadingStats() {
     const entries = Object.values(readingStats.books || {});
     const today = statsDateKey();
@@ -552,6 +596,7 @@
         <div class="cover"></div>
         <div class="name"></div>
         <div class="author"></div>
+        <div class="reading-stats"></div>
         <div class="prog"><i></i></div>
         <div class="pct"></div>
         <button class="del" title="Remove">×</button>`;
@@ -559,6 +604,12 @@
       if (b.cover) cover.style.backgroundImage = `url("${b.cover}")`; else cover.textContent = b.title;
       card.querySelector(".name").textContent = b.title;
       card.querySelector(".author").textContent = (b.type === "pdf" ? "PDF" : "EPUB") + (b.author ? " · " + b.author : "");
+      const bookStats = readingStats.books[b.id];
+      if (bookStats && ((Number(bookStats.totalSeconds) || 0) > 0 || (Array.isArray(bookStats.seenPages) && bookStats.seenPages.length))) {
+        card.querySelector(".reading-stats").textContent =
+          "Reading · " + formatReadingDuration(bookStats.totalSeconds) + " · " +
+          (Array.isArray(bookStats.seenPages) ? bookStats.seenPages.length : 0) + " pages";
+      }
       if (pos && pos.pct != null) {
         card.querySelector(".pct").textContent = `${pos.pct}% read`;
         card.style.setProperty("--p", Math.min(100, Math.max(0, pos.pct)) + "%");
@@ -574,6 +625,7 @@
       });
       grid.appendChild(card);
     }
+    renderLibraryStats();
   }
 
   /* ---------- Open / close ---------- */
