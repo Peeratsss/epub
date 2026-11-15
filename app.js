@@ -117,7 +117,11 @@
 
   function typographyCSS() {
     const f = FONTS[fontIdx] || FONTS[0];
-    let css = "";
+    let css = `
+      html, body { box-sizing: border-box !important; width: 100% !important; min-height: 100% !important; }
+      body { margin: 0 !important; padding: 0.5in !important; }
+      img, svg, video, table { max-width: 100% !important; }
+    `;
     if (f.gf) css += `@import url('https://fonts.googleapis.com/css2?family=${f.gf}&display=swap');\n`;
     if (f.css) css += `body, body *:not(code):not(pre):not(kbd) { font-family: ${f.css} !important; }\n`;
     if (lineH) css += `body, body p, body div, body li, body span { line-height: ${lineH} !important; }\n`;
@@ -313,7 +317,7 @@
     book = ePub(rec.data);
     book.opened.catch(openFailed);
     rendition = book.renderTo("viewer", {
-      width: "100%", height: "100%", flow: "paginated", spread: "auto", allowScriptedContent: false,
+      width: "100%", height: "100%", flow: "paginated", spread: "none", allowScriptedContent: false,
     });
     for (const [name, rules] of Object.entries(THEMES)) rendition.themes.register(name, rules);
     rendition.themes.fontSize(fontSize + "%");
