@@ -58,6 +58,13 @@
   let fontIdx = store.get("fontIdx", 0);
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
   let pdfZoom = store.get("pdfZoom", 1);
+  let helperEnabled = store.get("helperEnabled", false);
+  let helperMode = store.get("helperMode", "underline");
+  let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
+  let helperBgColor = store.get("helperBgColor", "#fff09a");
+  let helperTextColor = store.get("helperTextColor", "#292238");
+  const helperHighlightName = "reader-word-helper";
+
 
   const THEMES = {
     light: { body: { background: "#fcf9ff", color: "#2b2139" } },
@@ -154,6 +161,26 @@
     $("lh-range").value = lineH ? Math.round(lineH * 10) : 11;
     $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
     $("zoom-range").value = Math.round(pdfZoom * 100); $("zoom-label").textContent = Math.round(pdfZoom * 100) + "%";
+    $("helper-mode").value = helperMode;
+    $("helper-underline-color").value = helperUnderlineColor;
+    $("helper-bg-color").value = helperBgColor;
+    $("helper-text-color").value = helperTextColor;
+    updateHelperControls();
+    updateHelperButton();
+    $("helper-mode").addEventListener("change", (e) => {
+      helperMode = e.target.value; store.set("helperMode", helperMode);
+      updateHelperControls(); refreshHelperStyles();
+    });
+    $("helper-underline-color").addEventListener("input", (e) => {
+      helperUnderlineColor = e.target.value; store.set("helperUnderlineColor", helperUnderlineColor); refreshHelperStyles();
+    });
+    $("helper-bg-color").addEventListener("input", (e) => {
+      helperBgColor = e.target.value; store.set("helperBgColor", helperBgColor); refreshHelperStyles();
+    });
+    $("helper-text-color").addEventListener("input", (e) => {
+      helperTextColor = e.target.value; store.set("helperTextColor", helperTextColor); refreshHelperStyles();
+    });
+
 
     sel.addEventListener("change", () => { fontIdx = +sel.value; store.set("fontIdx", fontIdx); applyTypography(); });
     $("size-range").addEventListener("input", (e) => {
@@ -334,7 +361,10 @@
     });
     for (const [name, rules] of Object.entries(THEMES)) rendition.themes.register(name, rules);
     rendition.themes.fontSize(fontSize + "%");
-    rendition.hooks.content.register((contents) => styleDoc(contents.document));
+    rendition.hooks.content.register((contents) => {
+      styleDoc(contents.document);
+      attachReadingHelper(contents.document);
+    });
     applyTheme();
 
     anns.forEach(drawAnn);
@@ -719,6 +749,128 @@
       if (mode === "pdf" && pdf) setupContinuousPdf().then(() => pdfGo(pdfPage)).catch(() => {});
     }, 350);
   });
+
+
+  /* ---------- Reading Helper ---------- */
+  const helperDocs = new Set();
+  function updateHelperButton() {
+    const button = $("helper-toggle");
+    button.setAttribute("aria-pressed", helperEnabled ? "true" : "false");
+    button.textContent = helperEnabled ? "◎ Helper: On" : "◎ Helper";
+    button.title = helperEnabled ? "Turn Reading Helper off" : "Turn Reading Helper on";
+  }
+  function updateHelperControls() {
+    const isHighlight = helperMode === "highlight";
+    $("helper-underline-field").hidden = isHighlight;
+    $("helper-highlight-fields").hidden = !isHighlight;
+  }
+  function helperStyleText() {
+    if (helperMode === "highlight") {
+      return `::highlight(${helperHighlightName}){background:${helperBgColor};color:${helperTextColor};text-decoration:none}`;
+    }
+    return `::highlight(${helperHighlightName}){background:transparent;color:inherit;text-decoration:underline 2px ${helperUnderlineColor};text-underline-offset:2px}`;
+  }
+  function applyHelperStyle(doc) {
+    if (!doc || !doc.head) return;
+    let style = doc.getElementById("reader-helper-style");
+    if (!style) { style = doc.createElement("style"); style.id = "reader-helper-style"; doc.head.appendChild(style); }
+    style.textContent = helperStyleText();
+  }
+  function clearHelperDoc(doc) {
+    try { doc.defaultView.CSS.highlights.delete(helperHighlightName); } catch {}
+  }
+  function attachReadingHelper(doc) {
+    if (!doc || helperDocs.has(doc)) return;
+    helperDocs.add(doc);
+    applyHelperStyle(doc);
+    let lastMove = 0;
+    doc.addEventListener("mousemove", (e) => {
+      if (!helperEnabled || !current) { clearHelperDoc(doc); return; }
+      const now = performance.now();
+      if (now - lastMove < 12) return;
+      lastMove = now;
+      let caret = null;
+      try {
+        if (doc.caretRangeFromPoint) caret = doc.caretRangeFromPoint(e.clientX, e.clientY);
+        else if (doc.caretPositionFromPoint) {
+          const p = doc.caretPositionFromPoint(e.clientX, e.clientY);
+          if (p) { caret = doc.createRange(); caret.setStart(p.offsetNode, p.offset); caret.collapse(true); }
+        }
+      } catch {}
+      if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) { clearHelperDoc(doc); return; }
+      const node = caret.startContainer, text = node.nodeValue || "";
+      let start = caret.startOffset, end = caret.startOffset;
+      const isWord = (ch) => !!ch && /[\p{L}\p{N}_'’\-]/u.test(ch);
+      if (start > 0 && !isWord(text.charAt(start)) && isWord(text.charAt(start - 1))) start--;
+      if (!isWord(text.charAt(start))) { clearHelperDoc(doc); return; }
+      end = start;
+      while (start > 0 && isWord(text.charAt(start - 1))) start--;
+      while (end < text.length && isWord(text.charAt(end))) end++;
+      if (end <= start) { clearHelperDoc(doc); return; }
+      try {
+        const range = doc.createRange();
+        range.setStart(node, start); range.setEnd(node, end);
+        if (!range.toString().trim() || !range.getBoundingClientRect().width) { clearHelperDoc(doc); return; }
+        const HighlightClass = doc.defaultView.Highlight;
+        const highlights = doc.defaultView.CSS && doc.defaultView.CSS.highlights;
+        if (!HighlightClass || !highlights) { clearHelperDoc(doc); return; }
+        applyHelperStyle(doc);
+        highlights.set(helperHighlightName, new HighlightClass(range));
+      } catch { clearHelperDoc(doc); }
+    }, { passive: true });
+    doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
+  }
+  function refreshHelperStyles() {
+    helperDocs.forEach((doc) => {
+      applyHelperStyle(doc);
+      clearHelperDoc(doc);
+    });
+  }
+  function setHelperEnabled(on) {
+    helperEnabled = !!on;
+    store.set("helperEnabled", helperEnabled);
+    updateHelperButton();
+    if (!helperEnabled) helperDocs.forEach(clearHelperDoc);
+    else {
+      if (mode === "pdf") attachReadingHelper(document);
+      else if (rendition) rendition.getContents().forEach((c) => attachReadingHelper(c.document));
+    }
+  }
+  $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
+  $("pdfview").addEventListener("mousemove", (e) => {
+    if (!helperEnabled || mode !== "pdf") return;
+    const target = e.target;
+    if (!target.closest || !target.closest(".textLayer")) {
+      clearHelperDoc(document);
+      return;
+    }
+    attachReadingHelper(document);
+    // PDF text layers live in the main document; use the same word-range logic.
+    let caret = null;
+    try {
+      if (document.caretRangeFromPoint) caret = document.caretRangeFromPoint(e.clientX, e.clientY);
+      else if (document.caretPositionFromPoint) {
+        const p = document.caretPositionFromPoint(e.clientX, e.clientY);
+        if (p) { caret = document.createRange(); caret.setStart(p.offsetNode, p.offset); caret.collapse(true); }
+      }
+    } catch {}
+    if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) { clearHelperDoc(document); return; }
+    const node = caret.startContainer, text = node.nodeValue || "";
+    let start = caret.startOffset, end = caret.startOffset;
+    const isWord = (ch) => !!ch && /[\p{L}\p{N}_'’\-]/u.test(ch);
+    if (start > 0 && !isWord(text.charAt(start)) && isWord(text.charAt(start - 1))) start--;
+    if (!isWord(text.charAt(start))) { clearHelperDoc(document); return; }
+    end = start;
+    while (start > 0 && isWord(text.charAt(start - 1))) start--;
+    while (end < text.length && isWord(text.charAt(end))) end++;
+    try {
+      const range = document.createRange(); range.setStart(node, start); range.setEnd(node, end);
+      const HighlightClass = window.Highlight;
+      if (!HighlightClass || !CSS.highlights) { clearHelperDoc(document); return; }
+      applyHelperStyle(document);
+      CSS.highlights.set(helperHighlightName, new HighlightClass(range));
+    } catch { clearHelperDoc(document); }
+  }, { passive: true });
 
   /* ---------- Panels ---------- */
   function hidePanels() { ["toc", "settings", "notes"].forEach((p) => ($(p).hidden = true)); }
