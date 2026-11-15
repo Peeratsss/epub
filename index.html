@@ -158,17 +158,12 @@
   <div id="dictionary-dialog" class="dictionary-dialog" hidden role="dialog" aria-modal="true" aria-label="Word dictionary">
     <section class="dictionary-card">
       <header class="dictionary-heading">
-        <div><div class="dictionary-eyebrow">WORD LOOKUP</div><h2 id="dictionary-title"></h2></div>
-        <button id="dictionary-close" class="btn" type="button" aria-label="Close dictionary">×</button>
-      </header>
-      <div class="dictionary-edit-row">
-        <label for="dictionary-word-input">Term to look up</label>
-        <div class="dictionary-edit-controls">
-          <input id="dictionary-word-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" aria-label="Edit word or phrase to look up">
-          <button id="dictionary-word-search" class="btn primary" type="button">Look up</button>
+        <div class="dictionary-title-edit">
+          <div class="dictionary-eyebrow">WORD LOOKUP</div>
+          <input id="dictionary-word-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" aria-label="Edit word or phrase to look up" placeholder="Enter a word or phrase">
         </div>
-        <p class="helper-hint">Edit the term if the reader selected multiple words together, then look it up again.</p>
-      </div>
+        <button id="dictionary-word-search" class="btn primary" type="button">Look up</button>
+      </header>
       <div id="dictionary-status" class="dictionary-status">Looking up…</div>
       <section class="dictionary-section">
         <h3>Dictionary &amp; reference description</h3>
