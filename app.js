@@ -64,7 +64,7 @@
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
   // Public Cloudflare Worker endpoint. The Gemini API key stays in the Worker secret.
-  const GEMINI_PROXY_URL = "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE";
+  const GEMINI_PROXY_URL = "https://epub.jlzuniga6657qc.workers.dev";
   const helperHighlightName = "reader-word-helper";
 
 
