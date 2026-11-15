@@ -190,7 +190,7 @@
     ["font-field", "size-field", "lh-field"].forEach((id) => ($(id).hidden = isPdf));
     $("zoom-field").hidden = !isPdf;
     $("book-theme-field").hidden = isPdf;
-    $("viewer").hidden = isPdf;
+    $("epub-sheet").hidden = isPdf;
     $("pdfview").hidden = !isPdf;
     $("settings-title").textContent = isPdf ? "PDF settings" : "Text settings";
   }
