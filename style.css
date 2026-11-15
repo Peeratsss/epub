@@ -195,3 +195,6 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 .gemini-key-actions{display:flex;gap:8px;margin-top:-8px;margin-bottom:10px}
 #gemini-key{display:block;width:100%;margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);font:inherit}
 @media(max-width:600px){.dictionary-dialog{padding:8px}.dictionary-card{max-height:92vh;padding:15px}.dictionary-heading h2{font-size:21px}}
+
+/* Independent word dictionary / etymology toggle */
+#dictionary-toggle[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#35103f}
