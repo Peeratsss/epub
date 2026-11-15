@@ -493,7 +493,7 @@
     try {
       const tc = await page.getTextContent();
       if (token !== pdfToken) return;
-      await pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport: vp, textDivs: [] }).promise;
+      await pdfjsLib.renderTextLayer({ textContent: tc, container: tl, viewport: vp, textDivs: [] }).promise;
     } catch (e) { console.warn("text layer failed", e); }
   }
 
