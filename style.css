@@ -133,7 +133,8 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 
 /* Fixed US Letter sheet for EPUB content only. */
 #epub-sheet {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  width: auto;
   min-width: 0;
   min-height: 0;
   height: 100%;
