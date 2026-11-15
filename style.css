@@ -198,3 +198,11 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 
 /* Independent word dictionary / etymology toggle */
 #dictionary-toggle[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#35103f}
+
+/* Editable term field in dictionary popup */
+.dictionary-edit-row{padding:12px 0 4px}
+.dictionary-edit-row>label{display:block;margin-bottom:7px;font-size:12px;font-weight:700;color:var(--muted)}
+.dictionary-edit-controls{display:flex;gap:8px}
+#dictionary-word-input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--fg);font:inherit}
+#dictionary-word-input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.dictionary-edit-controls .btn{flex:none}
