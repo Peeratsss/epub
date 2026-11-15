@@ -129,3 +129,21 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 .pdf-page .hlLayer{pointer-events:none}
 .pdf-link{position:absolute;display:block;z-index:4;background:transparent;cursor:pointer}
 .pdf-link[href^="http"]{cursor:pointer}
+
+
+/* EPUB pages use a centered US Letter sheet; PDF layout is untouched. */
+#viewer { display:flex; align-items:center; justify-content:center; padding:12px; }
+#viewer .epub-container {
+  height:100% !important;
+  width:auto !important;
+  max-width:100% !important;
+  aspect-ratio:8.5 / 11;
+  margin:0 auto !important;
+  background:var(--surface);
+  box-shadow:0 5px 28px rgba(20,12,30,.18);
+}
+#viewer iframe { background:var(--surface) !important; }
+@media (max-width:700px) {
+  #viewer { padding:4px; }
+  #viewer .epub-container { height:auto !important; width:100% !important; aspect-ratio:8.5 / 11; }
+}
