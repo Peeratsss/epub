@@ -59,6 +59,7 @@
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
   let pdfZoom = store.get("pdfZoom", 1);
   let helperEnabled = store.get("helperEnabled", false);
+  let dictionaryEnabled = store.get("dictionaryEnabled", true);
   let helperMode = store.get("helperMode", "underline");
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
@@ -890,7 +891,7 @@
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
     doc.addEventListener("click", (e) => {
-      if (!helperEnabled || !current || e.target.closest("a")) return;
+      if (!helperEnabled || !dictionaryEnabled || !current || e.target.closest("a")) return;
       const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
       const word = caret && getHelperWordRange(doc, caret);
       if (word) lookupDictionary(word.range.toString(), word.context);
@@ -967,11 +968,20 @@
     if (!GEMINI_PROXY_URL || GEMINI_PROXY_URL === "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE") {
       throw new Error("Cloudflare Worker is not configured yet. Add its URL to GEMINI_PROXY_URL near the top of app.js.");
     }
-    const response = await fetch(GEMINI_PROXY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ word, context: context || word })
-    });
+    let response;
+    try {
+      response = await fetch(GEMINI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word, context: context || word })
+      });
+    } catch (error) {
+      console.error("Gemini Worker connection failed:", error, {
+        worker: GEMINI_PROXY_URL,
+        pageOrigin: location.origin
+      });
+      throw new Error("Could not connect to the Cloudflare Worker. This usually means its CORS origin does not match " + location.origin + ", or the Worker deployment is not serving this endpoint. Check the Worker deployment and request logs.");
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error?.message || data.error || ("Gemini proxy failed (" + response.status + ")"));
     const text = extractInteractionText(data);
@@ -1045,6 +1055,20 @@
     }
   }
   $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
+  function updateDictionaryButton() {
+    const button = $("dictionary-toggle");
+    button.setAttribute("aria-pressed", dictionaryEnabled ? "true" : "false");
+    button.textContent = dictionaryEnabled ? "⌕ Lookup: On" : "⌕ Lookup: Off";
+    button.title = dictionaryEnabled ? "Turn word dictionary and etymology lookup off" : "Turn word dictionary and etymology lookup on";
+  }
+  function setDictionaryEnabled(on) {
+    dictionaryEnabled = !!on;
+    store.set("dictionaryEnabled", dictionaryEnabled);
+    updateDictionaryButton();
+    if (!dictionaryEnabled) closeDictionary();
+  }
+  $("dictionary-toggle").addEventListener("click", () => setDictionaryEnabled(!dictionaryEnabled));
+  updateDictionaryButton();
   $("pdfview").addEventListener("mousemove", (e) => {
     if (!helperEnabled || mode !== "pdf") return;
     const target = e.target;
@@ -1068,7 +1092,7 @@
     } catch { clearHelperDoc(document); }
   }, { passive: true });
   $("pdfview").addEventListener("click", (e) => {
-    if (!helperEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
+    if (!helperEnabled || !dictionaryEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
     const caret = getCaretAtPoint(document, e.clientX, e.clientY);
     const word = caret && getHelperWordRange(document, caret);
     if (word) lookupDictionary(word.range.toString(), word.context);
