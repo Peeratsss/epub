@@ -204,3 +204,94 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 #dictionary-toggle[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#35103f}
 
 /* Editable term field in dictionary popup */
+
+
+/* Library annotation backup and reading statistics */
+.library-tools{display:flex;align-items:center;gap:7px}
+.library-tools .btn{padding:8px 11px;font-size:12px}
+.restore-backup{cursor:pointer}
+.stats-dialog{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:18px;background:rgba(18,10,28,.58)}
+.stats-dialog[hidden]{display:none}
+.stats-card{width:min(820px,100%);max-height:90vh;overflow:auto;padding:24px;border:1px solid var(--border);border-radius:22px;background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
+.stats-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}
+.stats-eyebrow{color:var(--accent-text);font-size:10px;font-weight:800;letter-spacing:.15em}
+.stats-header h2{margin:4px 0 0;font:600 27px/1.1 var(--font-display);letter-spacing:-.03em}
+.stats-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stats-metric{min-width:0;padding:15px;border:1px solid var(--border);border-radius:14px;background:var(--bg)}
+.stats-metric span{display:block;color:var(--muted);font-size:11px;line-height:1.4}
+.stats-metric strong{display:block;margin-top:8px;color:var(--fg);font:600 25px/1.1 var(--font-display);overflow-wrap:anywhere}
+.stats-columns{display:grid;grid-template-columns:1fr 1.15fr;gap:22px;margin-top:24px}
+.stats-section{min-width:0}
+.stats-section h3{margin:0 0 10px;font:600 17px var(--font-display)}
+.stats-row,.stats-book-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 2px;border-bottom:1px solid var(--border)}
+.stats-date{color:var(--muted);font-size:12px}
+.stats-value{font-size:12px;font-weight:700;text-align:right}
+.stats-book-info{display:flex;flex-direction:column;min-width:0}
+.stats-book-info strong{overflow-wrap:anywhere;font-size:13px}
+.stats-book-info span{color:var(--muted);font-size:11px}
+.stats-book-time{flex:none;font-size:12px}
+.stats-footnote{margin:18px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+
+/* Auto-detected internal PDF citations and printed page references */
+.pdf-ref-link{position:absolute;display:block;z-index:5;border-radius:2px;background:transparent;cursor:pointer}
+.pdf-ref-link:hover{background:rgba(205,108,235,.16);outline:1px solid rgba(166,64,193,.42)}
+@media(max-width:850px){
+  .library-top{gap:9px}
+  .library-tools{gap:5px}
+  .library-tools .btn{padding:7px 9px}
+}
+@media(max-width:600px){
+  .library-top{flex-wrap:wrap;gap:8px}
+  .library-top .top-spacer{display:none}
+  .library-top>.add-book{order:1;margin-left:auto}
+  .library-tools{order:2;flex:1;justify-content:flex-start}
+  .library-tools .btn{padding:7px 8px;font-size:11px}
+  .stats-card{padding:17px;border-radius:17px}
+  .stats-header h2{font-size:23px}
+  .stats-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .stats-metric{padding:12px}
+  .stats-metric strong{font-size:22px}
+  .stats-columns{grid-template-columns:1fr;gap:18px;margin-top:20px}
+}
+
+
+/* Reading overview embedded in the Library page */
+.library-stats-panel{
+  margin:0 0 38px;
+  padding:22px 24px 18px;
+  border:1px solid var(--border);
+  border-radius:20px;
+  background:var(--surface);
+  box-shadow:0 8px 24px rgba(50,28,70,.045);
+}
+.library-stats-heading{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:17px}
+.library-stats-heading h2{margin:4px 0 0;font:600 25px/1.1 var(--font-display);letter-spacing:-.03em}
+.library-stats-period{color:var(--muted);font-size:11px}
+.library-stats-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.library-stat-card{min-width:0;padding:14px 15px;border:1px solid var(--border);border-radius:13px;background:var(--bg)}
+.library-stat-card span{display:block;color:var(--muted);font-size:11px;line-height:1.4}
+.library-stat-card strong{display:block;margin-top:7px;color:var(--fg);font:600 24px/1.1 var(--font-display);overflow-wrap:anywhere}
+.library-stats-week{margin-top:19px}
+.library-stats-week-title{margin-bottom:9px;font-size:12px;font-weight:700}
+.library-stats-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.library-stats-day{min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px}
+.library-stats-bar-wrap{width:100%;height:48px;display:flex;align-items:flex-end;overflow:hidden;border-radius:7px 7px 4px 4px;background:var(--surface-2)}
+.library-stats-bar-wrap i{display:block;width:100%;min-height:3px;border-radius:6px 6px 2px 2px;background:var(--accent)}
+.library-stats-day strong{color:var(--fg);font-size:10px;font-weight:700}
+.library-stats-day span{color:var(--muted);font-size:10px}
+.card .reading-stats{margin-top:4px;color:var(--accent-text);font-size:11px;font-weight:700;line-height:1.35}
+@media(max-width:850px){
+  .library-stats-panel{padding:19px}
+  .library-stats-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  .library-stats-panel{margin-bottom:29px;padding:16px 14px;border-radius:17px}
+  .library-stats-heading{align-items:flex-start;flex-direction:column;gap:5px}
+  .library-stats-heading h2{font-size:23px}
+  .library-stats-metrics{gap:8px}
+  .library-stat-card{padding:12px}
+  .library-stat-card strong{font-size:21px}
+  .library-stats-days{gap:6px}
+  .library-stats-bar-wrap{height:38px}
+  .library-stats-day strong,.library-stats-day span{font-size:9px}
+}
