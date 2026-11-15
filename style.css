@@ -253,3 +253,45 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
   .stats-metric strong{font-size:22px}
   .stats-columns{grid-template-columns:1fr;gap:18px;margin-top:20px}
 }
+
+
+/* Reading overview embedded in the Library page */
+.library-stats-panel{
+  margin:0 0 38px;
+  padding:22px 24px 18px;
+  border:1px solid var(--border);
+  border-radius:20px;
+  background:var(--surface);
+  box-shadow:0 8px 24px rgba(50,28,70,.045);
+}
+.library-stats-heading{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:17px}
+.library-stats-heading h2{margin:4px 0 0;font:600 25px/1.1 var(--font-display);letter-spacing:-.03em}
+.library-stats-period{color:var(--muted);font-size:11px}
+.library-stats-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.library-stat-card{min-width:0;padding:14px 15px;border:1px solid var(--border);border-radius:13px;background:var(--bg)}
+.library-stat-card span{display:block;color:var(--muted);font-size:11px;line-height:1.4}
+.library-stat-card strong{display:block;margin-top:7px;color:var(--fg);font:600 24px/1.1 var(--font-display);overflow-wrap:anywhere}
+.library-stats-week{margin-top:19px}
+.library-stats-week-title{margin-bottom:9px;font-size:12px;font-weight:700}
+.library-stats-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.library-stats-day{min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px}
+.library-stats-bar-wrap{width:100%;height:48px;display:flex;align-items:flex-end;overflow:hidden;border-radius:7px 7px 4px 4px;background:var(--surface-2)}
+.library-stats-bar-wrap i{display:block;width:100%;min-height:3px;border-radius:6px 6px 2px 2px;background:var(--accent)}
+.library-stats-day strong{color:var(--fg);font-size:10px;font-weight:700}
+.library-stats-day span{color:var(--muted);font-size:10px}
+.card .reading-stats{margin-top:4px;color:var(--accent-text);font-size:11px;font-weight:700;line-height:1.35}
+@media(max-width:850px){
+  .library-stats-panel{padding:19px}
+  .library-stats-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  .library-stats-panel{margin-bottom:29px;padding:16px 14px;border-radius:17px}
+  .library-stats-heading{align-items:flex-start;flex-direction:column;gap:5px}
+  .library-stats-heading h2{font-size:23px}
+  .library-stats-metrics{gap:8px}
+  .library-stat-card{padding:12px}
+  .library-stat-card strong{font-size:21px}
+  .library-stats-days{gap:6px}
+  .library-stats-bar-wrap{height:38px}
+  .library-stats-day strong,.library-stats-day span{font-size:9px}
+}
