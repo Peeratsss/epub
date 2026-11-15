@@ -96,6 +96,7 @@
   let mode = null; // "epub" | "pdf"
   let book = null, rendition = null, current = null, saveTimer = null;
   let pdf = null, pdfPage = 1, pdfNum = 0, pdfToken = 0, pdfRender = null;
+  let pdfObserver = null, pdfPageNodes = new Map(), pdfRendered = new Set(), pdfPageScale = 1, pdfScrollTimer = null;
   let tocFlat = [];
   let bookmarks = [], anns = [];
   let pendingSel = null, editingId = null, notesTab = "bm";
@@ -375,6 +376,8 @@
     try { if (pdf) pdf.destroy(); } catch {}
     try { if (rendition) rendition.destroy(); if (book) book.destroy(); } catch {}
     rendition = null; book = null; pdf = null; pdfRender = null; pdfNum = 0; pdfPage = 1;
+    if (pdfObserver) pdfObserver.disconnect(); pdfObserver = null;
+    pdfPageNodes.clear(); pdfRendered.clear(); clearTimeout(pdfScrollTimer);
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
     pendingSel = null;
     $("viewer").innerHTML = "";
@@ -452,49 +455,89 @@
     pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
     const doc = pdf;
     pdf.getOutline().then((o) => buildPdfTOC(doc, o)).catch(() => buildPdfTOC(doc, null));
+    await setupContinuousPdf();
     pdfGo(pdfPage);
   }
 
+  async function setupContinuousPdf() {
+    const view = $("pdfview"), root = $("pdfpage");
+    if (pdfObserver) pdfObserver.disconnect();
+    pdfPageNodes.clear(); pdfRendered.clear();
+    root.innerHTML = "";
+    const first = await pdf.getPage(1);
+    const base = Math.min(Math.max(view.clientWidth - 44, 280), 900) / first.getViewport({ scale: 1 }).width;
+    pdfPageScale = Math.max(base, 0.1) * pdfZoom;
+    for (let n = 1; n <= pdfNum; n++) {
+      const page = n === 1 ? first : await pdf.getPage(n);
+      const vp = page.getViewport({ scale: pdfPageScale });
+      const wrap = document.createElement("div");
+      wrap.className = "pdf-page";
+      wrap.dataset.page = n;
+      wrap.style.width = vp.width + "px";
+      wrap.style.height = vp.height + "px";
+      wrap.style.setProperty("--page-width", vp.width + "px");
+      wrap.setAttribute("aria-label", "PDF page " + n);
+      root.appendChild(wrap);
+      pdfPageNodes.set(n, wrap);
+    }
+    pdfObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const n = +entry.target.dataset.page;
+          renderPdfPage(n).catch((e) => console.warn("PDF page render failed", n, e));
+        }
+      });
+    }, { root: view, rootMargin: "1200px 0px" });
+    pdfPageNodes.forEach((node) => pdfObserver.observe(node));
+    updatePdfUI();
+  }
+
   async function renderPdfPage(n) {
-    const token = ++pdfToken;
-    const page = await pdf.getPage(n);
-    if (token !== pdfToken) return;
-    const view = $("pdfview");
-    const w1 = page.getViewport({ scale: 1 }).width;
-    const base = Math.min(view.clientWidth - 24, 900) / w1;
-    const vp = page.getViewport({ scale: Math.max(base, 0.1) * pdfZoom });
-    const dpr = window.devicePixelRatio || 1;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
-    canvas.style.width = vp.width + "px"; canvas.style.height = vp.height + "px";
-
-    try { if (pdfRender) pdfRender.cancel(); } catch {}
-    pdfRender = page.render({
-      canvasContext: canvas.getContext("2d"), viewport: vp,
-      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
-    });
-    try { await pdfRender.promise; }
-    catch (e) { if (e && e.name === "RenderingCancelledException") return; throw e; }
-    if (token !== pdfToken) return;
-
-    const wrap = $("pdfpage");
-    wrap.innerHTML = "";
-    wrap.style.width = vp.width + "px"; wrap.style.height = vp.height + "px";
-    wrap.appendChild(canvas);
-    const hl = document.createElement("div"); hl.className = "hlLayer"; wrap.appendChild(hl);
-    const tl = document.createElement("div"); tl.className = "textLayer";
-    tl.style.setProperty("--scale-factor", vp.scale);
-    wrap.appendChild(tl);
-    drawPdfHighlights();
-    hideLoading();
-
-    // selectable text on top (added after the page is visible so page turns feel instant)
+    if (!pdf || pdfRendered.has(n)) return;
+    const doc = pdf, wrap = pdfPageNodes.get(n);
+    if (!wrap) return;
+    pdfRendered.add(n);
     try {
+      const page = await doc.getPage(n);
+      if (doc !== pdf) return;
+      const vp = page.getViewport({ scale: pdfPageScale });
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
+      canvas.style.width = vp.width + "px"; canvas.style.height = vp.height + "px";
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp,
+        transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null }).promise;
+      if (doc !== pdf) return;
+      wrap.innerHTML = "";
+      wrap.appendChild(canvas);
+      const hl = document.createElement("div"); hl.className = "hlLayer"; wrap.appendChild(hl);
+      const tl = document.createElement("div"); tl.className = "textLayer";
+      tl.style.setProperty("--scale-factor", vp.scale); wrap.appendChild(tl);
       const tc = await page.getTextContent();
-      if (token !== pdfToken) return;
+      if (doc !== pdf) return;
       await pdfjsLib.renderTextLayer({ textContent: tc, container: tl, viewport: vp, textDivs: [] }).promise;
-    } catch (e) { console.warn("text layer failed", e); }
+      drawPdfHighlights(n, wrap);
+      const annotations = await page.getAnnotations();
+      annotations.filter((x) => x.subtype === "Link" && x.rect).forEach((ann) => {
+        const rect = vp.convertToViewportRectangle(ann.rect);
+        const left = Math.min(rect[0], rect[2]), top = Math.min(rect[1], rect[3]);
+        const link = document.createElement("a");
+        link.className = "pdf-link";
+        link.style.left = left + "px"; link.style.top = top + "px";
+        link.style.width = Math.abs(rect[2] - rect[0]) + "px";
+        link.style.height = Math.abs(rect[3] - rect[1]) + "px";
+        link.title = ann.url ? "Open link" : "Go to linked page";
+        if (ann.url) { link.href = ann.url; link.target = "_blank"; link.rel = "noopener noreferrer"; }
+        else if (ann.dest) { link.href = "#"; link.addEventListener("click", async (e) => {
+          e.preventDefault(); const target = await resolvePdfDest(doc, ann.dest); if (target) pdfGo(target);
+        }); }
+        else return;
+        wrap.appendChild(link);
+      });
+    } catch (e) {
+      pdfRendered.delete(n);
+      throw e;
+    }
   }
 
   async function pdfGo(n) {
@@ -503,13 +546,15 @@
     pdfPage = n;
     updatePdfUI();
     hideSelbar();
-    try { await renderPdfPage(n); } catch (e) { openFailed(e); return; }
-    const view = $("pdfview");
-    view.scrollTop = 0;
+    const node = pdfPageNodes.get(n);
+    if (node) {
+      node.scrollIntoView({ behavior: "auto", block: "start" });
+      renderPdfPage(n).catch(openFailed);
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       if (current) store.set("pos:" + current.id, { page: pdfPage, pct: Math.round((pdfPage / pdfNum) * 100) });
-    }, 300);
+    }, 500);
   }
 
   function updatePdfUI() {
@@ -568,11 +613,11 @@
     return label;
   }
 
-  function drawPdfHighlights() {
-    const layer = $("pdfpage").querySelector(".hlLayer");
+  function drawPdfHighlights(pageNo = pdfPage, pageWrap = $("pdfpage").querySelector('[data-page="' + pdfPage + '"]')) {
+    const layer = pageWrap && pageWrap.querySelector(".hlLayer");
     if (!layer) return;
     layer.innerHTML = "";
-    anns.filter((a) => a.page === pdfPage && a.rects).forEach((a) => a.rects.forEach((r) => {
+    anns.filter((a) => a.page === pageNo && a.rects).forEach((a) => a.rects.forEach((r) => {
       const d = document.createElement("div");
       d.className = "hl-rect";
       d.style.cssText = `left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${r.h * 100}%;background:${a.color}`;
@@ -587,8 +632,8 @@
     clearTimeout(selTimer);
     selTimer = setTimeout(() => {
       const sel = window.getSelection();
-      const pageEl = $("pdfpage");
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !pageEl.contains(sel.anchorNode)) {
+      const pageEl = sel && sel.anchorNode && sel.anchorNode.parentElement ? sel.anchorNode.parentElement.closest(".pdf-page") : null;
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !pageEl) {
         if (pendingSel && pendingSel.pdf) hideSelbar();
         return;
       }
@@ -599,17 +644,20 @@
         .map((r) => ({ x: (r.left - wr.left) / wr.width, y: (r.top - wr.top) / wr.height, w: r.width / wr.width, h: r.height / wr.height }))
         .filter((r) => r.w > 0.002 && r.h > 0.002 && r.h < 0.06 && r.w < 0.98);
       if (!rects.length) return;
-      pendingSel = { pdf: true, page: pdfPage, rects, text };
+      pendingSel = { pdf: true, page: +pageEl.dataset.page, rects, text };
       $("selbar").hidden = false;
     }, 250);
   });
 
   // click a PDF highlight to open its note
   $("pdfpage").addEventListener("click", (e) => {
-    if (window.getSelection().toString()) return;
-    const wr = $("pdfpage").getBoundingClientRect();
+    if (window.getSelection().toString() || e.target.closest(".pdf-link")) return;
+    const pageEl = e.target.closest(".pdf-page");
+    if (!pageEl) return;
+    const pageNo = +pageEl.dataset.page;
+    const wr = pageEl.getBoundingClientRect();
     const x = (e.clientX - wr.left) / wr.width, y = (e.clientY - wr.top) / wr.height;
-    const hit = anns.find((a) => a.page === pdfPage && a.rects && a.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h));
+    const hit = anns.find((a) => a.page === pageNo && a.rects && a.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h));
     if (hit) openNote(hit.id);
   });
 
@@ -631,7 +679,9 @@
   window.addEventListener("resize", () => {
     if (mode !== "pdf" || !pdf) return;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => renderPdfPage(pdfPage).catch(() => {}), 250);
+    resizeTimer = setTimeout(() => {
+      if (mode === "pdf" && pdf) setupContinuousPdf().then(() => pdfGo(pdfPage)).catch(() => {});
+    }, 350);
   });
 
   /* ---------- Panels ---------- */
@@ -947,6 +997,23 @@
   $("modal-cancel").addEventListener("click", closeNote);
   $("modal-delete").addEventListener("click", () => { if (editingId) removeAnn(editingId); closeNote(); });
   $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeNote(); });
+
+  $("pdfview").addEventListener("scroll", () => {
+    if (mode !== "pdf" || !pdf) return;
+    clearTimeout(pdfScrollTimer);
+    pdfScrollTimer = setTimeout(() => {
+      const viewRect = $("pdfview").getBoundingClientRect();
+      const center = viewRect.top + viewRect.height * 0.35;
+      let best = pdfPage, distance = Infinity;
+      pdfPageNodes.forEach((node, n) => {
+        const r = node.getBoundingClientRect();
+        const d = center < r.top ? r.top - center : center > r.bottom ? center - r.bottom : 0;
+        if (d < distance) { distance = d; best = n; }
+      });
+      if (best !== pdfPage) { pdfPage = best; updatePdfUI(); clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => { if (current) store.set("pos:" + current.id, { page: pdfPage, pct: Math.round(pdfPage / pdfNum * 100) }); }, 400); }
+    }, 80);
+  }, { passive: true });
 
   $("progress").addEventListener("input", (e) => {
     if (mode === "pdf") $("progress-text").textContent = `${e.target.value} / ${pdfNum}`;
