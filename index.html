@@ -139,7 +139,7 @@
       return urls.reduce((previous, url) => previous.catch(() => new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = url;
-        script.onload = resolve;
+        script.onload = () => resolve(url);
         script.onerror = () => { script.remove(); reject(new Error("Could not load " + url)); };
         document.head.appendChild(script);
       })), Promise.reject());
@@ -175,8 +175,15 @@
 
       for (const lib of libraries) {
         try {
-          await loadFirst(lib.urls);
-          console.info(lib.name + " loaded");
+          const loadedUrl = await loadFirst(lib.urls);
+          if (lib.name === "PDF.js") {
+            window.__pdfWorkerSrc = loadedUrl.includes("cdnjs.cloudflare.com")
+              ? "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
+              : loadedUrl.includes("jsdelivr.net")
+                ? "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
+                : "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+          }
+          console.info(lib.name + " loaded from " + loadedUrl);
         } catch (error) {
           console.error(lib.name + " failed to load from all configured CDNs", error);
         }
