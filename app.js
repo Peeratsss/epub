@@ -992,7 +992,6 @@
     const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
     if (!word || word.length > 100) return;
     $("dictionary-dialog").hidden = false;
-    $("dictionary-title").textContent = word;
     $("dictionary-word-input").value = word;
     $("dictionary-status").textContent = "Loading dictionary references and Gemini etymology…";
     setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
@@ -1049,7 +1048,6 @@
     }
   });
   function closeDictionary() { $("dictionary-dialog").hidden = true; }
-  $("dictionary-close").addEventListener("click", closeDictionary);
   $("dictionary-dialog").addEventListener("click", e => { if (e.target === $("dictionary-dialog")) closeDictionary(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("dictionary-dialog").hidden) closeDictionary(); });
 
