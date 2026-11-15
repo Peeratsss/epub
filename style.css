@@ -177,3 +177,21 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 .helper-settings h4{margin:0 0 14px;font:600 16px var(--font-display)}
 .helper-settings input[type=color]{display:block;width:100%;height:38px;margin-top:8px;padding:3px;border:1px solid var(--border);border-radius:9px;background:var(--surface);cursor:pointer}
 .helper-hint{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.45}
+
+/* Dictionary and Gemini etymology popup */
+.dictionary-dialog{position:fixed;inset:0;z-index:1100;display:grid;place-items:center;padding:18px;background:rgba(18,10,28,.56)}
+.dictionary-dialog[hidden]{display:none}
+.dictionary-card{width:min(760px,100%);max-height:86vh;overflow:auto;padding:22px;border:1px solid var(--border);border-radius:18px;background:var(--bg);color:var(--fg);box-shadow:var(--shadow)}
+.dictionary-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.dictionary-eyebrow{font-size:10px;font-weight:800;letter-spacing:.14em;color:var(--accent)}
+.dictionary-heading h2{margin:4px 0 0;font:700 25px var(--font-display);overflow-wrap:anywhere}
+.dictionary-status{padding:10px 0;color:var(--muted);font-size:12px}
+.dictionary-section{padding:13px 0;border-top:1px solid var(--border)}
+.dictionary-section h3{margin:0 0 9px;font:700 14px var(--font-display)}
+.dictionary-copy{font-size:13px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+.dictionary-sources{display:flex;flex-wrap:wrap;gap:8px}
+.dictionary-sources a{display:inline-flex;padding:7px 10px;border:1px solid var(--border);border-radius:9px;color:var(--accent-text);font-size:12px;text-decoration:none}
+.dictionary-sources a:hover{border-color:var(--accent);background:var(--surface-2)}
+.gemini-key-actions{display:flex;gap:8px;margin-top:-8px;margin-bottom:10px}
+#gemini-key{display:block;width:100%;margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);font:inherit}
+@media(max-width:600px){.dictionary-dialog{padding:8px}.dictionary-card{max-height:92vh;padding:15px}.dictionary-heading h2{font-size:21px}}
