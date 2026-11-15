@@ -822,12 +822,92 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
+  /* ---------- Find in book (Ctrl+F) ---------- */
+  let searchResults = [];
+  function openSearch() {
+    if (!mode || $("reader").hidden) return;
+    $("search-dialog").hidden = false;
+    $("search-status").textContent = "Search the text of this book.";
+    $("search-input").value = "";
+    $("search-results").innerHTML = "";
+    setTimeout(() => $("search-input").focus(), 0);
+  }
+  function closeSearch() {
+    $("search-dialog").hidden = true;
+    $("search-input").blur();
+  }
+  async function runSearch() {
+    const query = $("search-input").value.trim();
+    const status = $("search-status"), list = $("search-results");
+    list.innerHTML = "";
+    searchResults = [];
+    if (!query) { status.textContent = "Type a word or phrase to search."; return; }
+    status.textContent = "Searching…";
+    try {
+      if (mode === "epub" && book) {
+        const found = await book.find(query);
+        searchResults = (found || []).map((r) => ({
+          label: r.excerpt || query, detail: r.cfi ? "Match in book" : "Match",
+          go: () => rendition.display(r.cfi)
+        })).filter((r) => r.go);
+      } else if (mode === "pdf" && pdf) {
+        const doc = pdf;
+        for (let pageNo = 1; pageNo <= doc.numPages; pageNo++) {
+          if (doc !== pdf) return;
+          const page = await doc.getPage(pageNo);
+          const text = await page.getTextContent();
+          const words = text.items.map((x) => x.str || "").join(" ");
+          const lower = words.toLocaleLowerCase();
+          let at = 0;
+          while ((at = lower.indexOf(query.toLocaleLowerCase(), at)) !== -1) {
+            const start = Math.max(0, at - 65), end = Math.min(words.length, at + query.length + 85);
+            const excerpt = (start ? "…" : "") + words.slice(start, end).replace(/\s+/g, " ") + (end < words.length ? "…" : "");
+            searchResults.push({ label: excerpt, detail: "Page " + pageNo, go: () => pdfGo(pageNo) });
+            at += Math.max(1, query.length);
+          }
+        }
+      }
+      status.textContent = searchResults.length
+        ? searchResults.length + " result" + (searchResults.length === 1 ? "" : "s") + " found."
+        : "No matches found.";
+      searchResults.slice(0, 200).forEach((result, i) => {
+        const button = document.createElement("button");
+        button.className = "search-result";
+        const small = document.createElement("small"); small.textContent = result.detail;
+        const span = document.createElement("span"); span.textContent = result.label;
+        button.append(small, span);
+        button.addEventListener("click", async () => {
+          try { await result.go(); closeSearch(); } catch (e) { console.warn("Search navigation failed", e); }
+        });
+        list.appendChild(button);
+      });
+      if (searchResults.length > 200) status.textContent += " Showing the first 200.";
+    } catch (error) {
+      console.error("Book search failed", error);
+      status.textContent = "Search couldn't complete. Try another word or phrase.";
+    }
+  }
+  $("search-close").addEventListener("click", closeSearch);
+  $("search-submit").addEventListener("click", runSearch);
+  $("search-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); runSearch(); }
+    if (e.key === "Escape") closeSearch();
+  });
+  $("search-dialog").addEventListener("click", (e) => {
+    if (e.target === $("search-dialog")) closeSearch();
+  });
+
   /* ---------- Navigation & keys ---------- */
   function goNext() { if (mode === "pdf") pdfGo(pdfPage + 1); else if (rendition) rendition.next(); }
   function goPrev() { if (mode === "pdf") pdfGo(pdfPage - 1); else if (rendition) rendition.prev(); }
 
   function handleKey(e) {
-    if (!mode || $("reader").hidden || !$("modal").hidden) return;
+    if (e.key === "Escape" && !$("search-dialog").hidden) { closeSearch(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      if (mode && !$("reader").hidden) { e.preventDefault(); e.stopPropagation(); openSearch(); }
+      return;
+    }
+    if (!mode || $("reader").hidden || !$("modal").hidden || !$("search-dialog").hidden) return;
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     if (e.key === "ArrowRight" || e.key === "PageDown") goNext();
     else if (e.key === "ArrowLeft" || e.key === "PageUp") goPrev();
