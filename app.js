@@ -63,6 +63,7 @@
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
+  let geminiApiKey = store.get("geminiApiKey", "");
   const helperHighlightName = "reader-word-helper";
 
 
@@ -165,6 +166,28 @@
     $("helper-underline-color").value = helperUnderlineColor;
     $("helper-bg-color").value = helperBgColor;
     $("helper-text-color").value = helperTextColor;
+    $("gemini-key").placeholder = geminiApiKey ? "API key saved in this browser" : "Paste your Gemini API key";
+    $("gemini-key-status").textContent = geminiApiKey
+      ? "Gemini key saved in this browser. It is not written to GitHub."
+      : "Add a Google AI Studio API key to enable AI etymology. The key stays in this browser.";
+    $("gemini-key-save").addEventListener("click", () => {
+      const value = $("gemini-key").value.trim();
+      if (!value) { $("gemini-key-status").textContent = "Paste your API key first."; return; }
+      geminiApiKey = value;
+      store.set("geminiApiKey", geminiApiKey);
+      $("gemini-key").value = "";
+      $("gemini-key").placeholder = "API key saved in this browser";
+      $("gemini-key-status").textContent = "Key saved locally in this browser.";
+      toast("Gemini key saved");
+    });
+    $("gemini-key-clear").addEventListener("click", () => {
+      geminiApiKey = "";
+      localStorage.removeItem("geminiApiKey");
+      $("gemini-key").value = "";
+      $("gemini-key").placeholder = "Paste your Gemini API key";
+      $("gemini-key-status").textContent = "Gemini key forgotten on this browser.";
+      toast("Gemini key cleared");
+    });
     updateHelperControls();
     updateHelperButton();
     $("helper-mode").addEventListener("change", (e) => {
@@ -441,6 +464,7 @@
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
     if (typeof helperDocs !== "undefined") { helperDocs.forEach(clearHelperDoc); helperDocs.clear(); }
     pendingSel = null;
+    closeDictionary();
     $("viewer").innerHTML = "";
     $("pdfpage").innerHTML = "";
     $("toc").innerHTML = "";
@@ -785,45 +809,82 @@
     try { doc.defaultView.CSS.highlights.delete(helperHighlightName); } catch {}
   }
 
-  // Find a whole lexical token without replacing its text node. Keep common
-  // phonetic marks (including U+2032 PRIME) inside the token and include a
-  // directly enclosing pair of parentheses, e.g. "(tish′ūz)".
+  // A token is separated only by whitespace, comma, or period. Build one
+  // Range across adjacent inline text nodes so bold/italic/span boundaries do
+  // not split words such as (Tish′ūz).
   function getHelperWordRange(doc, caret) {
     if (!caret || caret.startContainer.nodeType !== doc.defaultView.Node.TEXT_NODE) return null;
-    const node = caret.startContainer;
-    const text = node.nodeValue || "";
-    let start = Math.min(caret.startOffset, text.length);
-    let end = start;
-    // Only these three characters split a hover token: space, comma, period.
-    const isWord = (ch) => !!ch && ch !== " " && ch !== "," && ch !== ".";
-
-    // If the pointer lands on punctuation immediately beside a word, snap to it.
-    if (!isWord(text.charAt(start)) && start > 0 && isWord(text.charAt(start - 1))) start--;
-    else if (!isWord(text.charAt(start)) && isWord(text.charAt(start + 1))) start++;
-
-    if (!isWord(text.charAt(start))) return null;
-    end = start;
-    while (start > 0 && isWord(text.charAt(start - 1))) start--;
-    while (end < text.length && isWord(text.charAt(end))) end++;
-
-    // Treat a parenthesized pronunciation/gloss as one hover target.
-    if (start > 0 && end < text.length && text.charAt(start - 1) === "(" && text.charAt(end) === ")") {
-      start--;
-      end++;
+    const caretNode = caret.startContainer;
+    let root = caretNode.parentElement;
+    const blockTags = new Set(["P","LI","TD","TH","BLOCKQUOTE","PRE","H1","H2","H3","H4","H5","H6"]);
+    while (root && root !== doc.body && !blockTags.has(root.tagName) && !root.classList.contains("textLayer")) {
+      root = root.parentElement;
     }
+    if (!root || root === doc.body) root = caretNode.parentElement || doc.body;
 
+    const walker = doc.createTreeWalker(root, doc.defaultView.NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const p = node.parentElement;
+        if (!p || p.closest("script,style,noscript,svg")) return doc.defaultView.NodeFilter.FILTER_REJECT;
+        if (p.closest("[hidden],.hidden")) return doc.defaultView.NodeFilter.FILTER_REJECT;
+        return doc.defaultView.NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    const nodes = [];
+    let total = 0, caretOffset = -1, current;
+    while ((current = walker.nextNode())) {
+      const value = current.nodeValue || "";
+      if (current === caretNode) caretOffset = total + Math.min(caret.startOffset, value.length);
+      nodes.push({ node: current, start: total, end: total + value.length, value });
+      total += value.length;
+    }
+    if (caretOffset < 0 || !nodes.length) return null;
+
+    const fullText = nodes.map(x => x.value).join("");
+    const isSeparator = (ch) => !ch || /[\\s,.]/u.test(ch);
+    let pos = caretOffset;
+    if (isSeparator(fullText.charAt(pos))) {
+      if (!isSeparator(fullText.charAt(pos - 1))) pos--;
+      else if (!isSeparator(fullText.charAt(pos + 1))) pos++;
+      else return null;
+    }
+    if (pos < 0 || pos >= fullText.length || isSeparator(fullText.charAt(pos))) return null;
+
+    let start = pos, end = pos + 1;
+    while (start > 0 && !isSeparator(fullText.charAt(start - 1))) start--;
+    while (end < fullText.length && !isSeparator(fullText.charAt(end))) end++;
+
+    const pointAt = (offset, preferNext) => {
+      for (let i = 0; i < nodes.length; i++) {
+        const item = nodes[i];
+        if (offset < item.end || (!preferNext && offset === item.end)) {
+          return { node: item.node, offset: Math.max(0, Math.min(item.value.length, offset - item.start)) };
+        }
+      }
+      const last = nodes[nodes.length - 1];
+      return { node: last.node, offset: last.value.length };
+    };
+    const a = pointAt(start, true), b = pointAt(end, false);
     const range = doc.createRange();
-    range.setStart(node, start);
-    range.setEnd(node, end);
+    range.setStart(a.node, a.offset);
+    range.setEnd(b.node, b.offset);
     if (!range.toString().trim() || !range.getBoundingClientRect().width) return null;
 
-    // Read the original weight for formatting awareness. CSS Custom Highlights
-    // paint the existing range and inherit its typography, including bold,
-    // without changing font-weight or causing text reflow.
-    const parent = node.parentElement;
+    const parent = caretNode.parentElement;
     const weight = parent ? doc.defaultView.getComputedStyle(parent).fontWeight : "400";
-    const isBold = weight === "bold" || (Number.parseInt(weight, 10) >= 600);
-    return { range, isBold };
+    const isBold = weight === "bold" || Number.parseInt(weight, 10) >= 600;
+    const context = fullText.slice(Math.max(0, start - 100), Math.min(fullText.length, end + 180)).replace(/\\s+/g, " ").trim();
+    return { range, isBold, context };
+  }
+  function getCaretAtPoint(doc, x, y) {
+    try {
+      if (doc.caretRangeFromPoint) return doc.caretRangeFromPoint(x, y);
+      if (doc.caretPositionFromPoint) {
+        const p = doc.caretPositionFromPoint(x, y);
+        if (p) { const r = doc.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r; }
+      }
+    } catch {}
+    return null;
   }
   function attachReadingHelper(doc) {
     if (!doc || helperDocs.has(doc)) return;
@@ -835,14 +896,7 @@
       const now = performance.now();
       if (now - lastMove < 12) return;
       lastMove = now;
-      let caret = null;
-      try {
-        if (doc.caretRangeFromPoint) caret = doc.caretRangeFromPoint(e.clientX, e.clientY);
-        else if (doc.caretPositionFromPoint) {
-          const p = doc.caretPositionFromPoint(e.clientX, e.clientY);
-          if (p) { caret = doc.createRange(); caret.setStart(p.offsetNode, p.offset); caret.collapse(true); }
-        }
-      } catch {}
+      const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
       if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) { clearHelperDoc(doc); return; }
       const word = getHelperWordRange(doc, caret);
       if (!word) { clearHelperDoc(doc); return; }
@@ -856,8 +910,163 @@
         highlights.set(helperHighlightName, new HighlightClass(range));
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
+    doc.addEventListener("click", (e) => {
+      if (!helperEnabled || !current || e.target.closest("a")) return;
+      const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
+      const word = caret && getHelperWordRange(doc, caret);
+      if (word) lookupDictionary(word.range.toString(), word.context);
+    });
     doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
   }
+  function appendDictionarySource(container, label, url) {
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = label;
+    container.appendChild(link);
+  }
+  function setDictionaryCopy(id, value) {
+    $(id).textContent = value || "No information was returned for this section.";
+  }
+  function extractInteractionText(data) {
+    if (data.output_text) return data.output_text;
+    const outputs = Array.isArray(data.outputs) ? data.outputs : [];
+    const outputText = outputs.filter(x => x.type === "text" && x.text).map(x => x.text).join("\\n");
+    if (outputText) return outputText;
+    const steps = Array.isArray(data.steps) ? data.steps : [];
+    return steps.filter(x => x.type === "model_output").flatMap(x => x.content || [])
+      .filter(x => x.type === "text" && x.text).map(x => x.text).join("\\n");
+  }
+  function extractInteractionCitations(data) {
+    const found = [];
+    const add = (annotations) => (annotations || []).forEach(a => {
+      const url = a.url || a.source;
+      if (url && /^https?:\\/\\//i.test(url) && !found.some(x => x.url === url)) {
+        found.push({ title: a.title || new URL(url).hostname, url });
+      }
+    });
+    (data.outputs || []).forEach(x => add(x.annotations));
+    (data.steps || []).forEach(step => (step.content || []).forEach(x => add(x.annotations)));
+    return found;
+  }
+  async function getReferenceDescription(word) {
+    const [dictResult, wikiResult] = await Promise.allSettled([
+      fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)).then(r => {
+        if (!r.ok) throw new Error("Dictionary entry not found");
+        return r.json();
+      }),
+      fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(word.replace(/ /g, "_"))).then(r => {
+        if (!r.ok) throw new Error("No Wikipedia summary");
+        return r.json();
+      })
+    ]);
+    const parts = [];
+    const sources = [];
+    if (dictResult.status === "fulfilled" && Array.isArray(dictResult.value)) {
+      const entry = dictResult.value[0];
+      if (entry.phonetic) parts.push("Pronunciation: " + entry.phonetic);
+      (entry.meanings || []).slice(0, 4).forEach(m => {
+        const defs = (m.definitions || []).slice(0, 2).map(d => d.definition).filter(Boolean);
+        if (defs.length) parts.push(m.partOfSpeech + ": " + defs.join(" / "));
+      });
+      if (entry.origin) parts.push("Recorded origin: " + entry.origin);
+      sources.push({ title: "Dictionary API", url: "https://dictionaryapi.dev/" });
+    }
+    let wikiTitle = "";
+    if (wikiResult.status === "fulfilled" && wikiResult.value && wikiResult.value.extract) {
+      const w = wikiResult.value;
+      wikiTitle = w.title || word;
+      parts.push("Reference overview: " + w.extract);
+      sources.push({ title: "Wikipedia — " + wikiTitle, url: w.content_urls?.desktop?.page || "https://en.wikipedia.org/wiki/" + encodeURIComponent(wikiTitle.replace(/ /g, "_")) });
+    }
+    sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
+    sources.push({ title: "MedlinePlus search", url: "https://medlineplus.gov/search/?q=" + encodeURIComponent(word) });
+    sources.push({ title: "PubMed search", url: "https://pubmed.ncbi.nlm.nih.gov/?term=" + encodeURIComponent(word) });
+    return { description: parts.join("\\n\\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
+  }
+  async function getGeminiEtymology(word, context) {
+    if (!geminiApiKey) throw new Error("Add your Gemini API key in Text settings → Gemini etymology.");
+    const prompt = `Analyze the term "${word}" in the context: "${context || word}".
+
+Use Google Search to verify etymological and medical claims. Focus on etymology as the AI-generated part, and distinguish historically attested origins from modern textbook word-part analysis. Never invent roots or claim certainty where the origin is disputed. If no reliable etymology can be verified, say so clearly.
+
+If this is a medical, anatomical, biological, pharmacological, or medico-legal term, use exactly these six sections:
+1. ROOTS — exact prefixes, roots, suffixes; source language (Greek, Latin, Old English, etc.); original meanings. Distinguish true historical etymology from educational word-part segmentation.
+2. LITERAL MEANING — direct word-for-word meaning of the components, noting when a literal translation is approximate.
+3. ROOT USES — high-yield clinical cognates using the same roots or affixes, with brief meanings.
+4. FULL WORD — accurate clinical definition, anatomy/pathophysiology or medico-legal significance at PNLE/NCLEX level.
+5. DIFFERENTIAL COMPARISON — compare with closely related concepts; use a compact table when useful.
+6. DISTINGUISHED FROM — commonly confused look-alike or sound-alike terms and their differences.
+
+If this is not a medical term, use a concise equivalent: ROOTS & ORIGIN, ORIGINAL/LITERAL MEANING, HISTORICAL DEVELOPMENT, MODERN MEANING, and RELATED WORDS. Do not force medical sections onto ordinary words.
+
+Be rigorous and concise. Do not blindly agree with a presumed root breakdown. Include source URLs or source names at the end when available. This is educational information, not a diagnosis or substitute for clinical references.`;
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiApiKey },
+      body: JSON.stringify({
+        model: "gemini-3.8-flash",
+        input: prompt,
+        tools: [{ type: "google_search" }],
+        store: false
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || ("Gemini request failed (" + response.status + ")"));
+    const text = extractInteractionText(data);
+    if (!text) throw new Error("Gemini returned no text. Try again.");
+    return { text, citations: extractInteractionCitations(data) };
+  }
+  async function lookupDictionary(rawWord, context) {
+    const word = String(rawWord || "").trim().replace(/^\\(+|\\)+$/g, "");
+    if (!word || word.length > 100) return;
+    $("dictionary-dialog").hidden = false;
+    $("dictionary-title").textContent = word;
+    $("dictionary-status").textContent = "Loading dictionary references and Gemini etymology…";
+    setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
+    setDictionaryCopy("dictionary-etymology", "Waiting for Gemini…");
+    $("dictionary-sources").innerHTML = "";
+    const cacheKey = "wordLookup:" + word.toLocaleLowerCase();
+    const cached = store.get(cacheKey, null);
+    if (cached && Date.now() - cached.savedAt < 30 * 24 * 60 * 60 * 1000) {
+      setDictionaryCopy("dictionary-definition", cached.description);
+      setDictionaryCopy("dictionary-etymology", cached.etymology || "No cached Gemini explanation.");
+      cached.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+      $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
+      if (!cached.etymology && geminiApiKey) {
+        try {
+          const ai = await getGeminiEtymology(word, context);
+          setDictionaryCopy("dictionary-etymology", ai.text);
+          ai.citations.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+          store.set(cacheKey, { ...cached, etymology: ai.text, sources: [...cached.sources, ...ai.citations], savedAt: Date.now() });
+        } catch (e) { setDictionaryCopy("dictionary-etymology", e.message); }
+      }
+      return;
+    }
+    const referencePromise = getReferenceDescription(word);
+    const aiPromise = getGeminiEtymology(word, context);
+    const [referenceResult, aiResult] = await Promise.allSettled([referencePromise, aiPromise]);
+    const reference = referenceResult.status === "fulfilled"
+      ? referenceResult.value
+      : { description: "Reference websites could not be reached. Check your internet connection.", sources: [] };
+    const ai = aiResult.status === "fulfilled"
+      ? aiResult.value
+      : { text: aiResult.reason?.message || "Gemini lookup failed.", citations: [] };
+    setDictionaryCopy("dictionary-definition", reference.description);
+    setDictionaryCopy("dictionary-etymology", ai.text);
+    const sources = [...reference.sources, ...ai.citations];
+    const uniqueSources = sources.filter((s, i) => s.url && sources.findIndex(x => x.url === s.url) === i);
+    uniqueSources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+    $("dictionary-status").textContent = referenceResult.status === "fulfilled" && aiResult.status === "fulfilled"
+      ? "Reference lookup complete · Gemini AI etymology"
+      : "Some sources were unavailable. Other sections may still be useful.";
+    store.set(cacheKey, { description: reference.description, etymology: aiResult.status === "fulfilled" ? ai.text : "", sources: uniqueSources, savedAt: Date.now() });
+  }
+  function closeDictionary() { $("dictionary-dialog").hidden = true; }
+  $("dictionary-close").addEventListener("click", closeDictionary);
+  $("dictionary-dialog").addEventListener("click", e => { if (e.target === $("dictionary-dialog")) closeDictionary(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("dictionary-dialog").hidden) closeDictionary(); });
+
   function refreshHelperStyles() {
     helperDocs.forEach((doc) => {
       applyHelperStyle(doc);
@@ -885,14 +1094,7 @@
     helperDocs.add(document);
     applyHelperStyle(document);
     // PDF text layers live in the main document; use the same word-range logic.
-    let caret = null;
-    try {
-      if (document.caretRangeFromPoint) caret = document.caretRangeFromPoint(e.clientX, e.clientY);
-      else if (document.caretPositionFromPoint) {
-        const p = document.caretPositionFromPoint(e.clientX, e.clientY);
-        if (p) { caret = document.createRange(); caret.setStart(p.offsetNode, p.offset); caret.collapse(true); }
-      }
-    } catch {}
+    const caret = getCaretAtPoint(document, e.clientX, e.clientY);
     if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) { clearHelperDoc(document); return; }
     const word = getHelperWordRange(document, caret);
     if (!word) { clearHelperDoc(document); return; }
@@ -904,6 +1106,12 @@
       CSS.highlights.set(helperHighlightName, new HighlightClass(range));
     } catch { clearHelperDoc(document); }
   }, { passive: true });
+  $("pdfview").addEventListener("click", (e) => {
+    if (!helperEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
+    const caret = getCaretAtPoint(document, e.clientX, e.clientY);
+    const word = caret && getHelperWordRange(document, caret);
+    if (word) lookupDictionary(word.range.toString(), word.context);
+  });
 
   /* ---------- Panels ---------- */
   function hidePanels() { ["toc", "settings", "notes"].forEach((p) => ($(p).hidden = true)); }
