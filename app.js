@@ -297,6 +297,10 @@
       statsSession.lastTick = Date.now();
     }
   });
+  window.addEventListener("pagehide", () => {
+    flushStatsTime(true);
+    if (statsSession) statsSession.active = false;
+  });
 
   function formatReadingDuration(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
