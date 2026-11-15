@@ -63,9 +63,8 @@
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
-  // Paste your Google AI Studio API key between the quotes below.
-  // WARNING: A key in client-side code is visible to anyone using the public website.
-  const GEMINI_API_KEY = "PASTE_YOUR_GEMINI_API_KEY_HERE";
+  // Public Cloudflare Worker endpoint. The Gemini API key stays in the Worker secret.
+  const GEMINI_PROXY_URL = "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE";
   const helperHighlightName = "reader-word-helper";
 
 
@@ -965,34 +964,16 @@
     return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
   }
   async function getGeminiEtymology(word, context) {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === "PASTE_YOUR_GEMINI_API_KEY_HERE") throw new Error("Add your Gemini API key in the GEMINI_API_KEY constant near the top of app.js.");
-    const prompt = `Analyze the term "${word}" in the context: "${context || word}".
-
-Use Google Search to verify etymological and medical claims. Focus on etymology as the AI-generated part, and distinguish historically attested origins from modern textbook word-part analysis. Never invent roots or claim certainty where the origin is disputed. If no reliable etymology can be verified, say so clearly.
-
-If this is a medical, anatomical, biological, pharmacological, or medico-legal term, use exactly these six sections:
-1. ROOTS — exact prefixes, roots, suffixes; source language (Greek, Latin, Old English, etc.); original meanings. Distinguish true historical etymology from educational word-part segmentation.
-2. LITERAL MEANING — direct word-for-word meaning of the components, noting when a literal translation is approximate.
-3. ROOT USES — high-yield clinical cognates using the same roots or affixes, with brief meanings.
-4. FULL WORD — accurate clinical definition, anatomy/pathophysiology or medico-legal significance at PNLE/NCLEX level.
-5. DIFFERENTIAL COMPARISON — compare with closely related concepts; use a compact table when useful.
-6. DISTINGUISHED FROM — commonly confused look-alike or sound-alike terms and their differences.
-
-If this is not a medical term, use a concise equivalent: ROOTS & ORIGIN, ORIGINAL/LITERAL MEANING, HISTORICAL DEVELOPMENT, MODERN MEANING, and RELATED WORDS. Do not force medical sections onto ordinary words.
-
-Be rigorous and concise. Do not blindly agree with a presumed root breakdown. Include source URLs or source names at the end when available. This is educational information, not a diagnosis or substitute for clinical references.`;
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    if (!GEMINI_PROXY_URL || GEMINI_PROXY_URL === "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE") {
+      throw new Error("Cloudflare Worker is not configured yet. Add its URL to GEMINI_PROXY_URL near the top of app.js.");
+    }
+    const response = await fetch(GEMINI_PROXY_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
-      body: JSON.stringify({
-        model: "gemini-3.8-flash",
-        input: prompt,
-        tools: [{ type: "google_search" }],
-        store: false
-      })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ word, context: context || word })
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error?.message || ("Gemini request failed (" + response.status + ")"));
+    if (!response.ok) throw new Error(data.error?.message || data.error || ("Gemini proxy failed (" + response.status + ")"));
     const text = extractInteractionText(data);
     if (!text) throw new Error("Gemini returned no text. Try again.");
     return { text, citations: extractInteractionCitations(data) };
@@ -1013,7 +994,7 @@ Be rigorous and concise. Do not blindly agree with a presumed root breakdown. In
       setDictionaryCopy("dictionary-etymology", cached.etymology || "No cached Gemini explanation.");
       cached.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
       $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
-      if (!cached.etymology && GEMINI_API_KEY && GEMINI_API_KEY !== "PASTE_YOUR_GEMINI_API_KEY_HERE") {
+      if (!cached.etymology && GEMINI_PROXY_URL && GEMINI_PROXY_URL !== "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE") {
         try {
           const ai = await getGeminiEtymology(word, context);
           setDictionaryCopy("dictionary-etymology", ai.text);
