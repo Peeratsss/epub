@@ -169,3 +169,11 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 @media (max-width: 700px) {
   #epub-sheet { max-width: calc(100% - 8px); }
 }
+
+
+/* Reading Helper */
+#helper-toggle[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#35103f}
+.helper-settings{margin-top:22px;padding-top:16px;border-top:1px solid var(--border)}
+.helper-settings h4{margin:0 0 14px;font:600 16px var(--font-display)}
+.helper-settings input[type=color]{display:block;width:100%;height:38px;margin-top:8px;padding:3px;border:1px solid var(--border);border-radius:9px;background:var(--surface);cursor:pointer}
+.helper-hint{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.45}
