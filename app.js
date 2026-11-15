@@ -113,7 +113,245 @@
 
   const saveBookmarks = () => store.set("bm:" + current.id, bookmarks);
   const saveAnns = () => store.set("an:" + current.id, anns);
+
+  const READING_STATS_KEY = "readingStats";
+  let readingStats = store.get(READING_STATS_KEY, { version: 1, books: {} });
+  if (!readingStats || typeof readingStats !== "object" || !readingStats.books || typeof readingStats.books !== "object") {
+    readingStats = { version: 1, books: {} };
+  }
+  let statsSession = null, statsTimer = null;
+  let pdfReferenceMap = new Map();
+
   const newId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+
+  /* ---------- Portable annotation backup ---------- */
+  async function exportAnnotationBackup() {
+    const libraryBooks = await getAllMeta();
+    const books = libraryBooks.map((meta) => ({
+      id: meta.id,
+      title: meta.title || "",
+      author: meta.author || "",
+      type: meta.type || "",
+      bookmarks: store.get("bm:" + meta.id, []),
+      annotations: store.get("an:" + meta.id, []),
+    })).filter((item) => item.bookmarks.length || item.annotations.length);
+    if (!books.length) { toast("There are no bookmarks or highlights to back up yet."); return; }
+    const payload = {
+      format: "papertrail-annotations",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      books,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "reader-annotations-backup-" + statsDateKey() + ".json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Annotation backup exported for " + books.length + " book(s).");
+  }
+
+  function mergeBackupItems(existing, incoming) {
+    const merged = new Map();
+    (Array.isArray(existing) ? existing : []).forEach((item, index) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        merged.set(item.id != null ? String(item.id) : "existing-" + index, item);
+      }
+    });
+    (Array.isArray(incoming) ? incoming : []).forEach((item, index) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        merged.set(item.id != null ? String(item.id) : "backup-" + index, item);
+      }
+    });
+    return Array.from(merged.values());
+  }
+
+  async function importAnnotationBackup(file) {
+    try {
+      if (!file || file.size > 25 * 1024 * 1024) throw new Error("The backup file is missing or larger than 25 MB.");
+      const payload = JSON.parse(await file.text());
+      if (!payload || payload.format !== "papertrail-annotations" || payload.version !== 1 || !Array.isArray(payload.books)) {
+        throw new Error("This is not a supported reader annotation backup.");
+      }
+      const libraryBooks = await getAllMeta();
+      let restored = 0, unmatched = 0;
+      const normalizeTitle = (value) => String(value || "").normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+      for (const item of payload.books) {
+        if (!item || typeof item.id !== "string" || !item.id || item.id.length > 500) { unmatched++; continue; }
+        const exact = libraryBooks.find((b) => b.id === item.id);
+        const titleMatches = exact ? [] : libraryBooks.filter((b) =>
+          b.type === item.type && normalizeTitle(b.title) === normalizeTitle(item.title)
+        );
+        const targetId = exact ? exact.id : (titleMatches.length === 1 ? titleMatches[0].id : item.id);
+        const oldBookmarks = store.get("bm:" + targetId, []);
+        const oldAnnotations = store.get("an:" + targetId, []);
+        const nextBookmarks = mergeBackupItems(oldBookmarks, item.bookmarks);
+        const nextAnnotations = mergeBackupItems(oldAnnotations, item.annotations);
+        store.set("bm:" + targetId, nextBookmarks);
+        store.set("an:" + targetId, nextAnnotations);
+        if (nextBookmarks.length || nextAnnotations.length) restored++;
+        else unmatched++;
+      }
+      toast("Restored annotations for " + restored + " book(s). Existing items were merged, not erased.");
+      renderLibrary();
+    } catch (error) {
+      console.error("Annotation backup import failed:", error);
+      toast(error.message || "Could not restore this backup.");
+    }
+  }
+
+  /* ---------- Reading statistics ---------- */
+  function statsDateKey(timestamp) {
+    const d = new Date(timestamp == null ? Date.now() : timestamp);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function statsBook(meta) {
+    if (!meta || !meta.id) return null;
+    if (!readingStats.books[meta.id]) {
+      readingStats.books[meta.id] = { title: meta.title || "Untitled", type: meta.type || "", totalSeconds: 0, seenPages: [], daily: {}, lastRead: 0 };
+    }
+    const entry = readingStats.books[meta.id];
+    if (!Array.isArray(entry.seenPages)) entry.seenPages = [];
+    if (!entry.daily || typeof entry.daily !== "object") entry.daily = {};
+    entry.title = meta.title || entry.title || "Untitled";
+    entry.type = meta.type || entry.type || "";
+    return entry;
+  }
+
+  function statsDaily(entry, date) {
+    const key = date || statsDateKey();
+    if (!entry.daily[key]) entry.daily[key] = { seconds: 0, pages: [] };
+    if (!Array.isArray(entry.daily[key].pages)) entry.daily[key].pages = [];
+    return entry.daily[key];
+  }
+
+  function saveReadingStats() {
+    store.set(READING_STATS_KEY, readingStats);
+  }
+
+  function statsPageKey() {
+    if (mode === "pdf") return "pdf:" + pdfPage;
+    if (mode === "epub" && rendition) {
+      const loc = rendition.currentLocation();
+      if (loc && loc.start) return "epub:" + (loc.start.location != null ? loc.start.location : loc.start.cfi || "");
+    }
+    return "";
+  }
+
+  function recordStatsPage(key) {
+    if (!statsSession || !current || statsSession.bookId !== current.id || !key) return;
+    const entry = statsBook(current);
+    const daily = statsDaily(entry);
+    if (!entry.seenPages.includes(key)) entry.seenPages.push(key);
+    if (!daily.pages.includes(key)) daily.pages.push(key);
+    entry.lastRead = Date.now();
+    saveReadingStats();
+  }
+
+  function flushStatsTime(force) {
+    if (!statsSession || !statsSession.active || !current || statsSession.bookId !== current.id) return;
+    const now = Date.now();
+    if (!force && document.hidden) { statsSession.lastTick = now; return; }
+    const elapsed = Math.max(0, Math.min((now - statsSession.lastTick) / 1000, 30));
+    if (elapsed >= 1) {
+      const entry = statsBook(current);
+      entry.totalSeconds = (Number(entry.totalSeconds) || 0) + elapsed;
+      const daily = statsDaily(entry);
+      daily.seconds = (Number(daily.seconds) || 0) + elapsed;
+      entry.lastRead = now;
+      saveReadingStats();
+    }
+    statsSession.lastTick = now;
+  }
+
+  function startStatsSession() {
+    stopStatsSession();
+    if (!current || !mode) return;
+    statsSession = { bookId: current.id, lastTick: Date.now(), active: !document.hidden };
+    const entry = statsBook(current);
+    entry.lastRead = Date.now();
+    saveReadingStats();
+    recordStatsPage(statsPageKey());
+    statsTimer = setInterval(() => flushStatsTime(false), 15000);
+  }
+
+  function stopStatsSession() {
+    flushStatsTime(true);
+    if (statsTimer) clearInterval(statsTimer);
+    statsTimer = null;
+    statsSession = null;
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!statsSession) return;
+    if (document.hidden) {
+      flushStatsTime(true);
+      statsSession.active = false;
+    } else {
+      statsSession.active = true;
+      statsSession.lastTick = Date.now();
+    }
+  });
+
+  function formatReadingDuration(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (hours) return hours + "h " + minutes + "m";
+    if (minutes) return minutes + "m";
+    return total ? total + "s" : "0m";
+  }
+
+  function renderReadingStats() {
+    const entries = Object.values(readingStats.books || {});
+    const today = statsDateKey();
+    const totalSeconds = entries.reduce((sum, item) => sum + (Number(item.totalSeconds) || 0), 0);
+    const totalPages = entries.reduce((sum, item) => sum + (Array.isArray(item.seenPages) ? item.seenPages.length : 0), 0);
+    const todaySeconds = entries.reduce((sum, item) => sum + (Number(item.daily && item.daily[today] && item.daily[today].seconds) || 0), 0);
+    const todayPages = entries.reduce((sum, item) => sum + (item.daily && item.daily[today] && Array.isArray(item.daily[today].pages) ? item.daily[today].pages.length : 0), 0);
+    $("stats-total-time").textContent = formatReadingDuration(totalSeconds);
+    $("stats-total-pages").textContent = String(totalPages);
+    $("stats-today-time").textContent = formatReadingDuration(todaySeconds);
+    $("stats-today-pages").textContent = String(todayPages);
+
+    const dailyList = $("stats-daily");
+    dailyList.innerHTML = "";
+    const make = (tag, cls, value) => {
+      const node = document.createElement(tag);
+      if (cls) node.className = cls;
+      if (value != null) node.textContent = value;
+      return node;
+    };
+    for (let offset = 6; offset >= 0; offset--) {
+      const d = new Date();
+      d.setDate(d.getDate() - offset);
+      const key = statsDateKey(d.getTime());
+      const daySeconds = entries.reduce((sum, item) => sum + (Number(item.daily && item.daily[key] && item.daily[key].seconds) || 0), 0);
+      const dayPages = entries.reduce((sum, item) => sum + (item.daily && item.daily[key] && Array.isArray(item.daily[key].pages) ? item.daily[key].pages.length : 0), 0);
+      const row = make("div", "stats-row");
+      row.append(make("span", "stats-date", d.toLocaleDateString(undefined, { month: "short", day: "numeric" })));
+      row.append(make("strong", "stats-value", formatReadingDuration(daySeconds) + " · " + dayPages + " page(s)"));
+      dailyList.appendChild(row);
+    }
+
+    const bookList = $("stats-books");
+    bookList.innerHTML = "";
+    entries.sort((a, b) => (Number(b.lastRead) || 0) - (Number(a.lastRead) || 0));
+    if (!entries.length) bookList.appendChild(make("div", "empty", "Your reading activity will appear here as you use the reader."));
+    entries.forEach((item) => {
+      const row = make("div", "stats-book-row");
+      const info = make("div", "stats-book-info");
+      info.append(make("strong", "", item.title || "Untitled"));
+      info.append(make("span", "", (item.type === "pdf" ? "PDF" : "EPUB") + " · " + (Array.isArray(item.seenPages) ? item.seenPages.length : 0) + " pages read"));
+      row.append(info, make("strong", "stats-book-time", formatReadingDuration(item.totalSeconds)));
+      bookList.appendChild(row);
+    });
+  }
 
   /* ---------- Theme / typography ---------- */
   function applyTheme() {
@@ -372,10 +610,12 @@
 
     const saved = store.get("pos:" + meta.id, null);
     rendition.on("rendered", hideLoading);
-    rendition.display(saved && saved.cfi ? saved.cfi : undefined).catch((err) => {
+    rendition.display(saved && saved.cfi ? saved.cfi : undefined).then(() => {
+      if (current === meta) startStatsSession();
+    }).catch((err) => {
       // a saved position can become invalid; fall back to the start of the book
       console.warn("display failed, retrying from start", err);
-      rendition.display().catch(openFailed);
+      rendition.display().then(() => { if (current === meta) startStatsSession(); }).catch(openFailed);
     });
 
     book.loaded.navigation.then((nav) => {
@@ -402,6 +642,7 @@
 
     rendition.on("relocated", (loc) => {
       updateProgress(loc);
+      recordStatsPage("epub:" + (loc.start.location != null ? loc.start.location : loc.start.cfi || ""));
       updateBmStar();
       hideSelbar();
       clearTimeout(saveTimer);
@@ -430,6 +671,7 @@
   }
 
   function closeBook() {
+    stopStatsSession();
     clearTimeout(saveTimer);
     hideLoading();
     pdfToken++;
@@ -439,6 +681,7 @@
     rendition = null; book = null; pdf = null; pdfRender = null; pdfNum = 0; pdfPage = 1;
     if (pdfObserver) pdfObserver.disconnect(); pdfObserver = null;
     pdfPageNodes.clear(); pdfRendered.clear(); clearTimeout(pdfScrollTimer);
+    pdfReferenceMap = new Map();
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
     if (typeof helperDocs !== "undefined") { helperDocs.forEach(clearHelperDoc); helperDocs.clear(); }
     pendingSel = null;
@@ -517,11 +760,21 @@
     const saved = store.get("pos:" + meta.id, null);
     pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
     const doc = pdf;
+    pdfReferenceMap = new Map();
+    buildPdfReferenceIndex(doc).then((map) => {
+      if (doc !== pdf) return;
+      pdfReferenceMap = map;
+      pdfPageNodes.forEach((wrap, pageNo) => {
+        const textLayer = wrap.querySelector(".textLayer");
+        if (textLayer) addPdfReferenceLinks(doc, wrap, textLayer, pageNo);
+      });
+    }).catch((error) => console.warn("PDF reference index failed:", error));
     pdf.getOutline().then((o) => buildPdfTOC(doc, o)).catch(() => buildPdfTOC(doc, null));
     try {
       await setupContinuousPdf();
       await renderPdfPage(pdfPage);
       pdfGo(pdfPage);
+      startStatsSession();
       hideLoading();
     } catch (e) {
       if (current === meta) openFailed(e);
@@ -585,6 +838,7 @@
       const tc = await page.getTextContent();
       if (doc !== pdf) return;
       await pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport: vp, textDivs: [] }).promise;
+      addPdfReferenceLinks(doc, wrap, tl, n);
       drawPdfHighlights(n, wrap);
       const annotations = await page.getAnnotations();
       annotations.filter((x) => x.subtype === "Link" && x.rect).forEach((ann) => {
@@ -614,6 +868,7 @@
     n = Math.min(Math.max(Math.round(n), 1), pdfNum);
     pdfPage = n;
     updatePdfUI();
+    recordStatsPage("pdf:" + n);
     hideSelbar();
     const node = pdfPageNodes.get(n);
     if (node) {
@@ -640,6 +895,114 @@
     if (ref && typeof ref === "object") return (await doc.getPageIndex(ref)) + 1;
     if (Number.isInteger(ref)) return ref + 1;
     return null;
+  }
+
+
+  async function buildPdfReferenceIndex(doc) {
+    const targets = new Map();
+    const firstCandidate = Math.max(1, Math.floor(doc.numPages * 0.5));
+    let referenceStart = 0;
+    for (let pageNo = doc.numPages; pageNo >= firstCandidate; pageNo--) {
+      if (doc !== pdf) return targets;
+      const page = await doc.getPage(pageNo);
+      const content = await page.getTextContent();
+      const text = content.items.map((item) => item.str || "").join(" ").replace(/\s+/g, " ").trim();
+      if (/\b(references?|bibliography|works cited|literature cited)\b/i.test(text)) {
+        referenceStart = pageNo;
+        break;
+      }
+      if (pageNo % 8 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    if (!referenceStart) return targets;
+    for (let pageNo = referenceStart; pageNo <= doc.numPages; pageNo++) {
+      if (doc !== pdf) return new Map();
+      const page = await doc.getPage(pageNo);
+      const content = await page.getTextContent();
+      const text = content.items.map((item) => item.str || "").join(" ");
+      const pattern = /\[(\d{1,4})\]/g;
+      let match;
+      while ((match = pattern.exec(text))) {
+        const number = Number(match[1]);
+        if (number > 0 && !targets.has(number)) targets.set(number, pageNo);
+      }
+      if (pageNo % 8 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return targets;
+  }
+
+  function addPdfReferenceLinks(doc, pageWrap, textLayer, pageNo) {
+    pageWrap.querySelectorAll(".pdf-ref-link").forEach((link) => link.remove());
+    if (doc !== pdf || !textLayer) return;
+    const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let fullText = "", node;
+    while ((node = walker.nextNode())) {
+      const value = node.nodeValue || "";
+      if (!value) continue;
+      nodes.push({ node, start: fullText.length, end: fullText.length + value.length });
+      fullText += value;
+    }
+    if (!fullText) return;
+
+    const matches = [];
+    const pagePattern = /\b(?:pages?|pp?\.?)\s*(\d{1,4})(?:\s*[-–—]\s*\d{1,4})?\b/gi;
+    let match;
+    while ((match = pagePattern.exec(fullText))) {
+      const target = Number(match[1]);
+      if (target >= 1 && target <= pdfNum && target !== pageNo) {
+        matches.push({ start: match.index, end: match.index + match[0].length, target, label: "page " + target });
+      }
+    }
+    const citationPattern = /\[(\d{1,4})(?:\s*[,;]\s*\d{1,4})*(?:\s*[-–—]\s*\d{1,4})?\]/g;
+    while ((match = citationPattern.exec(fullText))) {
+      const target = pdfReferenceMap.get(Number(match[1]));
+      if (target && target !== pageNo) {
+        matches.push({ start: match.index, end: match.index + match[0].length, target, label: "reference " + match[1] });
+      }
+    }
+    matches.sort((a, b) => a.start - b.start || b.end - a.end);
+    const unique = [];
+    matches.forEach((item) => {
+      const previous = unique[unique.length - 1];
+      if (!previous || item.start >= previous.end) unique.push(item);
+    });
+
+    const pointAt = (offset, preferNext) => {
+      for (const item of nodes) {
+        if (offset < item.end || (!preferNext && offset === item.end)) {
+          return { node: item.node, offset: Math.max(0, Math.min(item.node.nodeValue.length, offset - item.start)) };
+        }
+      }
+      const last = nodes[nodes.length - 1];
+      return { node: last.node, offset: last.node.nodeValue.length };
+    };
+    const pageRect = pageWrap.getBoundingClientRect();
+    unique.forEach((item) => {
+      const start = pointAt(item.start, true), end = pointAt(item.end, false);
+      const range = document.createRange();
+      try {
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+      } catch { return; }
+      Array.from(range.getClientRects()).forEach((rect) => {
+        if (rect.width < 1 || rect.height < 1) return;
+        const link = document.createElement("a");
+        link.className = "pdf-ref-link";
+        link.href = "#";
+        link.title = "Jump to " + item.label;
+        link.setAttribute("aria-label", "Jump to " + item.label);
+        link.style.left = (rect.left - pageRect.left) + "px";
+        link.style.top = (rect.top - pageRect.top) + "px";
+        link.style.width = rect.width + "px";
+        link.style.height = rect.height + "px";
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          pdfGo(item.target);
+        });
+        pageWrap.appendChild(link);
+      });
+    });
   }
 
   async function buildPdfTOC(doc, items) {
@@ -720,7 +1083,7 @@
 
   // click a PDF highlight to open its note
   $("pdfpage").addEventListener("click", (e) => {
-    if (window.getSelection().toString() || e.target.closest(".pdf-link")) return;
+    if (window.getSelection().toString() || e.target.closest(".pdf-link, .pdf-ref-link")) return;
     const pageEl = e.target.closest(".pdf-page");
     if (!pageEl) return;
     const pageNo = +pageEl.dataset.page;
@@ -1323,6 +1686,18 @@
 
   /* ---------- Wire up UI ---------- */
   $("file-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+  $("backup-export").addEventListener("click", exportAnnotationBackup);
+  $("backup-input").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importAnnotationBackup(file);
+    e.target.value = "";
+  });
+  $("stats-open").addEventListener("click", () => { renderReadingStats(); $("stats-dialog").hidden = false; });
+  $("stats-close").addEventListener("click", () => { $("stats-dialog").hidden = true; });
+  $("stats-dialog").addEventListener("click", (e) => { if (e.target === $("stats-dialog")) $("stats-dialog").hidden = true; });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("stats-dialog").hidden) $("stats-dialog").hidden = true;
+  });
   $("back").addEventListener("click", () => {
     closeBook();
     $("reader").hidden = true; $("library").hidden = false;
@@ -1372,7 +1747,7 @@
         const d = center < r.top ? r.top - center : center > r.bottom ? center - r.bottom : 0;
         if (d < distance) { distance = d; best = n; }
       });
-      if (best !== pdfPage) { pdfPage = best; updatePdfUI(); clearTimeout(saveTimer);
+      if (best !== pdfPage) { pdfPage = best; updatePdfUI(); recordStatsPage("pdf:" + best); clearTimeout(saveTimer);
         saveTimer = setTimeout(() => { if (current) store.set("pos:" + current.id, { page: pdfPage, pct: Math.round(pdfPage / pdfNum * 100) }); }, 400); }
     }, 80);
   }, { passive: true });
