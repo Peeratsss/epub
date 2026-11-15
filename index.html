@@ -15,31 +15,15 @@
   <section id="library">
     <header class="library-top">
       <div class="brand-mark" aria-hidden="true">✳</div>
-      <div class="brand-copy"><span>YOUR PERSONAL READING SPACE</span><strong>paper<span>trail</span></strong></div>
+      <div class="brand-copy"><strong>Library</strong></div>
       <div class="top-spacer"></div>
-      <span class="storage-chip"><i></i> Saved on this device</span>
+      <label class="btn primary add-book"><span>＋</span> Add book
+        <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
+      </label>
     </header>
-    <section class="library-hero">
-      <div class="hero-copy">
-        <div class="eyebrow">A little room for big ideas</div>
-        <h1>Your next chapter<br><em>starts here.</em></h1>
-        <p>Keep your books close, pick up where you left off, and make every page yours.</p>
-        <div class="hero-actions">
-          <label class="btn primary add-book"><span>＋</span> Add a book
-            <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
-          </label>
-        </div>
-      </div>
-      <div class="hero-art" aria-hidden="true">
-        <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
-        <div class="book-art book-back"></div><div class="book-art book-mid"></div>
-        <div class="book-art book-front"><span>THE<br>ART OF<br><b>BEGINNING</b></span><i>✳</i></div>
-        <div class="spark spark-one">✦</div><div class="spark spark-two">✧</div>
-      </div>
-    </section>
     <section class="shelf-section">
-      <div class="shelf-heading"><div><div class="eyebrow">YOUR COLLECTION</div><h2>On your shelf</h2></div></div>
-      <div id="drop-hint"><span class="empty-icon">✳</span><strong>Your shelf is waiting.</strong><span>Add an EPUB or PDF to make this space yours.</span></div>
+      <div class="shelf-heading"><div><h2>Books</h2></div></div>
+      <div id="drop-hint"><span class="empty-icon">＋</span><strong>No books yet</strong><span>Add an EPUB or PDF to get started.</span></div>
       <div id="grid"></div>
     </section>
   </section>
