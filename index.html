@@ -28,6 +28,37 @@
       </label>
     </header>
     <section class="shelf-section">
+      <section class="library-stats-panel" aria-labelledby="library-stats-title">
+        <div class="library-stats-heading">
+          <div>
+            <div class="stats-eyebrow">YOUR READING ACTIVITY</div>
+            <h2 id="library-stats-title">Reading overview</h2>
+          </div>
+          <span class="library-stats-period">All books · Updated automatically</span>
+        </div>
+        <div class="library-stats-metrics">
+          <article class="library-stat-card">
+            <span>Total reading time</span>
+            <strong id="library-stats-total-time">0m</strong>
+          </article>
+          <article class="library-stat-card">
+            <span>Pages read</span>
+            <strong id="library-stats-total-pages">0</strong>
+          </article>
+          <article class="library-stat-card">
+            <span>Today’s reading time</span>
+            <strong id="library-stats-today-time">0m</strong>
+          </article>
+          <article class="library-stat-card">
+            <span>Pages read today</span>
+            <strong id="library-stats-today-pages">0</strong>
+          </article>
+        </div>
+        <div class="library-stats-week">
+          <div class="library-stats-week-title">Last 7 days</div>
+          <div id="library-stats-daily" class="library-stats-days"></div>
+        </div>
+      </section>
       <div class="shelf-heading"><div><h2>Books</h2></div></div>
       <div id="drop-hint"><span class="empty-icon">＋</span><strong>No books yet</strong><span>Add an EPUB or PDF to get started.</span></div>
       <div id="grid"></div>
