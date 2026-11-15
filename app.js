@@ -766,10 +766,14 @@
     $("helper-highlight-fields").hidden = !isHighlight;
   }
   function helperStyleText() {
+    // CSS Custom Highlights paint over the existing text range. Do not set font,
+    // weight, size, spacing, or line-height here: those remain inherited from the
+    // book's original text, so hovering never substitutes or reflows a word.
     if (helperMode === "highlight") {
-      return `::highlight(${helperHighlightName}){background:${helperBgColor};color:${helperTextColor};text-decoration:none}`;
+      return `::highlight(${helperHighlightName}){background-color:${helperBgColor};color:${helperTextColor}}`;
     }
-    return `::highlight(${helperHighlightName}){background:transparent;color:inherit;text-decoration:underline 2px ${helperUnderlineColor};text-underline-offset:2px}`;
+    // Add only an underline; leave the word's original font and other styling intact.
+    return `::highlight(${helperHighlightName}){background-color:transparent;color:inherit;text-decoration-line:underline;text-decoration-color:${helperUnderlineColor};text-decoration-thickness:1px;text-underline-offset:2px}`;
   }
   function applyHelperStyle(doc) {
     if (!doc || !doc.head) return;
