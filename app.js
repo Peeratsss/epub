@@ -993,6 +993,7 @@
     if (!word || word.length > 100) return;
     $("dictionary-dialog").hidden = false;
     $("dictionary-title").textContent = word;
+    $("dictionary-word-input").value = word;
     $("dictionary-status").textContent = "Loading dictionary references and Gemini etymology…";
     setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
     setDictionaryCopy("dictionary-etymology", "Waiting for Gemini…");
@@ -1033,6 +1034,20 @@
       : "Some sources were unavailable. Other sections may still be useful.";
     store.set(cacheKey, { description: reference.description, etymology: aiResult.status === "fulfilled" ? ai.text : "", sources: uniqueSources, savedAt: Date.now() });
   }
+  $("dictionary-word-search").addEventListener("click", () => {
+    const editedWord = $("dictionary-word-input").value.trim();
+    if (!editedWord) {
+      $("dictionary-word-input").focus();
+      return;
+    }
+    lookupDictionary(editedWord, editedWord);
+  });
+  $("dictionary-word-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("dictionary-word-search").click();
+    }
+  });
   function closeDictionary() { $("dictionary-dialog").hidden = true; }
   $("dictionary-close").addEventListener("click", closeDictionary);
   $("dictionary-dialog").addEventListener("click", e => { if (e.target === $("dictionary-dialog")) closeDictionary(); });
