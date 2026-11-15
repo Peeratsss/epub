@@ -136,7 +136,7 @@ Be rigorous and concise. Do not blindly agree with a presumed root breakdown. In
       const messages = output.filter(item => item.type === "message");
       const content = messages.flatMap(item => Array.isArray(item.content) ? item.content : []);
       const text = content.filter(item => item.type === "output_text" && item.text)
-        .map(item => item.text).join("\\n");
+        .map(item => item.text).join("\n");
       if (!text) {
         return json({
           error: { message: "OpenAI fallback returned no text. Please try again.", provider: "OpenAI" }
