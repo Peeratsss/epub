@@ -64,8 +64,6 @@
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
-  // Public Cloudflare Worker endpoint. The Gemini API key stays in the Worker secret.
-  const GEMINI_PROXY_URL = "https://epub.jlzuniga6657qc.workers.dev";
   const helperHighlightName = "reader-word-helper";
 
 
@@ -908,27 +906,6 @@
   function setDictionaryCopy(id, value) {
     $(id).textContent = value || "No information was returned for this section.";
   }
-  function extractInteractionText(data) {
-    if (data.output_text) return data.output_text;
-    const outputs = Array.isArray(data.outputs) ? data.outputs : [];
-    const outputText = outputs.filter(x => x.type === "text" && x.text).map(x => x.text).join("\n");
-    if (outputText) return outputText;
-    const steps = Array.isArray(data.steps) ? data.steps : [];
-    return steps.filter(x => x.type === "model_output").flatMap(x => x.content || [])
-      .filter(x => x.type === "text" && x.text).map(x => x.text).join("\\n");
-  }
-  function extractInteractionCitations(data) {
-    const found = [];
-    const add = (annotations) => (annotations || []).forEach(a => {
-      const url = a.url || a.source;
-      if (url && (url.startsWith("https://") || url.startsWith("http://")) && !found.some(x => x.url === url)) {
-        found.push({ title: a.title || new URL(url).hostname, url });
-      }
-    });
-    (data.outputs || []).forEach(x => add(x.annotations));
-    (data.steps || []).forEach(step => (step.content || []).forEach(x => add(x.annotations)));
-    return found;
-  }
   async function getReferenceDescription(word) {
     const [dictResult, wikiResult] = await Promise.allSettled([
       fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)).then(r => {
@@ -964,74 +941,32 @@
     sources.push({ title: "PubMed search", url: "https://pubmed.ncbi.nlm.nih.gov/?term=" + encodeURIComponent(word) });
     return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
   }
-  async function getGeminiEtymology(word, context) {
-    if (!GEMINI_PROXY_URL || GEMINI_PROXY_URL === "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE") {
-      throw new Error("Cloudflare Worker is not configured yet. Add its URL to GEMINI_PROXY_URL near the top of app.js.");
-    }
-    let response;
-    try {
-      response = await fetch(GEMINI_PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word, context: context || word })
-      });
-    } catch (error) {
-      console.error("Gemini Worker connection failed:", error, {
-        worker: GEMINI_PROXY_URL,
-        pageOrigin: location.origin
-      });
-      throw new Error("Could not connect to the Cloudflare Worker. This usually means its CORS origin does not match " + location.origin + ", or the Worker deployment is not serving this endpoint. Check the Worker deployment and request logs.");
-    }
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error?.message || data.error || ("Gemini proxy failed (" + response.status + ")"));
-    const text = extractInteractionText(data);
-    if (!text) throw new Error("Gemini returned no text. Try again.");
-    return { text, citations: extractInteractionCitations(data), provider: data.provider || "Gemini", fallback: !!data.fallback };
-  }
-  async function lookupDictionary(rawWord, context) {
+  async function lookupDictionary(rawWord) {
     const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
     if (!word || word.length > 100) return;
     $("dictionary-dialog").hidden = false;
     $("dictionary-word-input").value = word;
-    $("dictionary-status").textContent = "Loading dictionary references and Gemini etymology…";
+    $("dictionary-status").textContent = "Loading dictionary references…";
     setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
-    setDictionaryCopy("dictionary-etymology", "Waiting for Gemini…");
     $("dictionary-sources").innerHTML = "";
     const cacheKey = "wordLookup:" + word.toLocaleLowerCase();
     const cached = store.get(cacheKey, null);
     if (cached && Date.now() - cached.savedAt < 30 * 24 * 60 * 60 * 1000) {
       setDictionaryCopy("dictionary-definition", cached.description);
-      setDictionaryCopy("dictionary-etymology", cached.etymology || "No cached Gemini explanation.");
-      cached.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+      (cached.sources || []).forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
       $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
-      if (!cached.etymology && GEMINI_PROXY_URL && GEMINI_PROXY_URL !== "PASTE_YOUR_CLOUDFLARE_WORKER_URL_HERE") {
-        try {
-          const ai = await getGeminiEtymology(word, context);
-          setDictionaryCopy("dictionary-etymology", ai.text);
-          ai.citations.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
-          store.set(cacheKey, { ...cached, etymology: ai.text, sources: [...cached.sources, ...ai.citations], savedAt: Date.now() });
-        } catch (e) { setDictionaryCopy("dictionary-etymology", e.message); }
-      }
       return;
     }
-    const referencePromise = getReferenceDescription(word);
-    const aiPromise = getGeminiEtymology(word, context);
-    const [referenceResult, aiResult] = await Promise.allSettled([referencePromise, aiPromise]);
-    const reference = referenceResult.status === "fulfilled"
-      ? referenceResult.value
-      : { description: "Reference websites could not be reached. Check your internet connection.", sources: [] };
-    const ai = aiResult.status === "fulfilled"
-      ? aiResult.value
-      : { text: aiResult.reason?.message || "Gemini lookup failed.", citations: [] };
-    setDictionaryCopy("dictionary-definition", reference.description);
-    setDictionaryCopy("dictionary-etymology", ai.text);
-    const sources = [...reference.sources, ...ai.citations];
-    const uniqueSources = sources.filter((s, i) => s.url && sources.findIndex(x => x.url === s.url) === i);
-    uniqueSources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
-    $("dictionary-status").textContent = referenceResult.status === "fulfilled" && aiResult.status === "fulfilled"
-      ? "Reference lookup complete · " + (ai.provider === "OpenAI" ? "OpenAI fallback" : "Gemini AI etymology")
-      : "Some sources were unavailable. Other sections may still be useful.";
-    store.set(cacheKey, { description: reference.description, etymology: aiResult.status === "fulfilled" ? ai.text : "", sources: uniqueSources, savedAt: Date.now() });
+    try {
+      const reference = await getReferenceDescription(word);
+      setDictionaryCopy("dictionary-definition", reference.description);
+      reference.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+      $("dictionary-status").textContent = "Dictionary lookup complete.";
+      store.set(cacheKey, { description: reference.description, sources: reference.sources, savedAt: Date.now() });
+    } catch (error) {
+      setDictionaryCopy("dictionary-definition", "Reference websites could not be reached. Check your internet connection.");
+      $("dictionary-status").textContent = "Dictionary lookup unavailable.";
+    }
   }
   $("dictionary-word-search").addEventListener("click", () => {
     const editedWord = $("dictionary-word-input").value.trim();
@@ -1072,7 +1007,7 @@
     const button = $("dictionary-toggle");
     button.setAttribute("aria-pressed", dictionaryEnabled ? "true" : "false");
     button.textContent = dictionaryEnabled ? "⌕ Lookup: On" : "⌕ Lookup: Off";
-    button.title = dictionaryEnabled ? "Turn word dictionary and etymology lookup off" : "Turn word dictionary and etymology lookup on";
+    button.title = dictionaryEnabled ? "Turn word lookup off" : "Turn word lookup on";
   }
   function setDictionaryEnabled(on) {
     dictionaryEnabled = !!on;
