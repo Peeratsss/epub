@@ -184,7 +184,11 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 .dictionary-card{width:min(760px,100%);max-height:86vh;overflow:auto;padding:22px;border:1px solid var(--border);border-radius:18px;background:var(--bg);color:var(--fg);box-shadow:var(--shadow)}
 .dictionary-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:14px;border-bottom:1px solid var(--border)}
 .dictionary-eyebrow{font-size:10px;font-weight:800;letter-spacing:.14em;color:var(--accent)}
-.dictionary-heading h2{margin:4px 0 0;font:700 25px var(--font-display);overflow-wrap:anywhere}
+.dictionary-title-edit{flex:1;min-width:0}
+.dictionary-title-edit input{display:block;width:100%;min-width:0;margin-top:4px;padding:3px 0;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:var(--fg);font:700 25px/1.25 var(--font-display);outline:none}
+.dictionary-title-edit input:focus{border-bottom-color:var(--accent)}
+.dictionary-title-edit input::placeholder{color:var(--muted)}
+.dictionary-heading>.btn{flex:none}
 .dictionary-status{padding:10px 0;color:var(--muted);font-size:12px}
 .dictionary-section{padding:13px 0;border-top:1px solid var(--border)}
 .dictionary-section h3{margin:0 0 9px;font:700 14px var(--font-display)}
@@ -200,9 +204,3 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 #dictionary-toggle[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#35103f}
 
 /* Editable term field in dictionary popup */
-.dictionary-edit-row{padding:12px 0 4px}
-.dictionary-edit-row>label{display:block;margin-bottom:7px;font-size:12px;font-weight:700;color:var(--muted)}
-.dictionary-edit-controls{display:flex;gap:8px}
-#dictionary-word-input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--fg);font:inherit}
-#dictionary-word-input:focus{outline:2px solid var(--accent);outline-offset:1px}
-.dictionary-edit-controls .btn{flex:none}
