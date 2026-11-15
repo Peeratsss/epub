@@ -120,7 +120,7 @@
     readingStats = { version: 1, books: {} };
   }
   let statsSession = null, statsTimer = null;
-  let pdfReferenceMap = new Map();
+  let pdfReferenceMap = new Map(), pdfAuthorYearMap = new Map();
 
   const newId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
@@ -238,7 +238,7 @@
     if (mode === "pdf") return "pdf:" + pdfPage;
     if (mode === "epub" && rendition) {
       const loc = rendition.currentLocation();
-      if (loc && loc.start) return "epub:" + (loc.start.location != null ? loc.start.location : loc.start.cfi || "");
+      if (loc && loc.start) return "epub:" + (loc.start.cfi || "");
     }
     return "";
   }
@@ -642,7 +642,7 @@
 
     rendition.on("relocated", (loc) => {
       updateProgress(loc);
-      recordStatsPage("epub:" + (loc.start.location != null ? loc.start.location : loc.start.cfi || ""));
+      recordStatsPage("epub:" + (loc.start.cfi || ""));
       updateBmStar();
       hideSelbar();
       clearTimeout(saveTimer);
@@ -682,6 +682,7 @@
     if (pdfObserver) pdfObserver.disconnect(); pdfObserver = null;
     pdfPageNodes.clear(); pdfRendered.clear(); clearTimeout(pdfScrollTimer);
     pdfReferenceMap = new Map();
+    pdfAuthorYearMap = new Map();
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
     if (typeof helperDocs !== "undefined") { helperDocs.forEach(clearHelperDoc); helperDocs.clear(); }
     pendingSel = null;
@@ -761,9 +762,11 @@
     pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
     const doc = pdf;
     pdfReferenceMap = new Map();
-    buildPdfReferenceIndex(doc).then((map) => {
+    pdfAuthorYearMap = new Map();
+    buildPdfReferenceIndex(doc).then((indexes) => {
       if (doc !== pdf) return;
-      pdfReferenceMap = map;
+      pdfReferenceMap = indexes.numbers;
+      pdfAuthorYearMap = indexes.authorYears;
       pdfPageNodes.forEach((wrap, pageNo) => {
         const textLayer = wrap.querySelector(".textLayer");
         if (textLayer) addPdfReferenceLinks(doc, wrap, textLayer, pageNo);
@@ -899,11 +902,12 @@
 
 
   async function buildPdfReferenceIndex(doc) {
-    const targets = new Map();
-    const firstCandidate = Math.max(1, Math.floor(doc.numPages * 0.5));
+    const numbers = new Map();
+    const authorYears = new Map();
+    const firstCandidate = Math.max(1, Math.floor(doc.numPages * 0.35));
     let referenceStart = 0;
     for (let pageNo = doc.numPages; pageNo >= firstCandidate; pageNo--) {
-      if (doc !== pdf) return targets;
+      if (doc !== pdf) return { numbers, authorYears };
       const page = await doc.getPage(pageNo);
       const content = await page.getTextContent();
       const text = content.items.map((item) => item.str || "").join(" ").replace(/\s+/g, " ").trim();
@@ -913,21 +917,44 @@
       }
       if (pageNo % 8 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    if (!referenceStart) return targets;
+    if (!referenceStart) return { numbers, authorYears };
     for (let pageNo = referenceStart; pageNo <= doc.numPages; pageNo++) {
-      if (doc !== pdf) return new Map();
+      if (doc !== pdf) return { numbers: new Map(), authorYears: new Map() };
       const page = await doc.getPage(pageNo);
       const content = await page.getTextContent();
       const text = content.items.map((item) => item.str || "").join(" ");
-      const pattern = /\[(\d{1,4})\]/g;
+      const numericPattern = /\[(\d{1,4})\]/g;
       let match;
-      while ((match = pattern.exec(text))) {
+      while ((match = numericPattern.exec(text))) {
         const number = Number(match[1]);
-        if (number > 0 && !targets.has(number)) targets.set(number, pageNo);
+        if (number > 0 && !numbers.has(number)) numbers.set(number, pageNo);
       }
+
+      // APA-style bibliography entries commonly begin with "Surname, Initials (Year)".
+      // Reconstruct visual lines from PDF.js text-item baselines before matching them.
+      let line = "", previousY = null;
+      const lines = [];
+      content.items.forEach((item) => {
+        const y = item.transform && Number.isFinite(item.transform[5]) ? item.transform[5] : null;
+        if (previousY !== null && y !== null && Math.abs(y - previousY) > 2.5) {
+          if (line.trim()) lines.push(line.trim());
+          line = "";
+        }
+        line += (line ? " " : "") + (item.str || "");
+        if (y !== null) previousY = y;
+      });
+      if (line.trim()) lines.push(line.trim());
+      lines.forEach((entry) => {
+        const cleaned = entry.replace(/^\s*(?:\[\d{1,4}\]|\d{1,4}[.)])\s*/, "");
+        const authorMatch = cleaned.match(/^([A-Z][A-Za-z'’-]{1,})\s*,[^0-9]{0,120}\b((?:19|20)\d{2}[a-z]?)\b/i);
+        if (authorMatch) {
+          const key = authorMatch[1].toLocaleLowerCase() + "|" + authorMatch[2].toLocaleLowerCase();
+          if (!authorYears.has(key)) authorYears.set(key, pageNo);
+        }
+      });
       if (pageNo % 8 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    return targets;
+    return { numbers, authorYears };
   }
 
   function addPdfReferenceLinks(doc, pageWrap, textLayer, pageNo) {
@@ -960,6 +987,26 @@
         matches.push({ start: match.index, end: match.index + match[0].length, target, label: "reference " + match[1] });
       }
     }
+    const authorPatterns = [
+      /\(([A-Z][A-Za-z'’-]{1,})(?:\s+et\s+al\.?)?,?\s*((?:19|20)\d{2}[a-z]?)\)/g,
+      /\b([A-Z][A-Za-z'’-]{1,})\s+et\s+al\.?\s*\(((?:19|20)\d{2}[a-z]?)\)/g,
+      /\b([A-Z][A-Za-z'’-]{1,})\s*\(((?:19|20)\d{2}[a-z]?)\)/g,
+    ];
+    authorPatterns.forEach((pattern) => {
+      let authorMatch;
+      while ((authorMatch = pattern.exec(fullText))) {
+        const surname = authorMatch[1], year = authorMatch[2];
+        const target = pdfAuthorYearMap.get(surname.toLocaleLowerCase() + "|" + year.toLocaleLowerCase());
+        if (target && target !== pageNo) {
+          matches.push({
+            start: authorMatch.index,
+            end: authorMatch.index + authorMatch[0].length,
+            target,
+            label: "reference " + surname + " (" + year + ")",
+          });
+        }
+      }
+    });
     matches.sort((a, b) => a.start - b.start || b.end - a.end);
     const unique = [];
     matches.forEach((item) => {
