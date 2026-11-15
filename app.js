@@ -63,7 +63,9 @@
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
-  let geminiApiKey = store.get("geminiApiKey", "");
+  // Paste your Google AI Studio API key between the quotes below.
+  // WARNING: A key in client-side code is visible to anyone using the public website.
+  const GEMINI_API_KEY = "PASTE_YOUR_GEMINI_API_KEY_HERE";
   const helperHighlightName = "reader-word-helper";
 
 
@@ -166,28 +168,6 @@
     $("helper-underline-color").value = helperUnderlineColor;
     $("helper-bg-color").value = helperBgColor;
     $("helper-text-color").value = helperTextColor;
-    $("gemini-key").placeholder = geminiApiKey ? "API key saved in this browser" : "Paste your Gemini API key";
-    $("gemini-key-status").textContent = geminiApiKey
-      ? "Gemini key saved in this browser. It is not written to GitHub."
-      : "Add a Google AI Studio API key to enable AI etymology. The key stays in this browser.";
-    $("gemini-key-save").addEventListener("click", () => {
-      const value = $("gemini-key").value.trim();
-      if (!value) { $("gemini-key-status").textContent = "Paste your API key first."; return; }
-      geminiApiKey = value;
-      store.set("geminiApiKey", geminiApiKey);
-      $("gemini-key").value = "";
-      $("gemini-key").placeholder = "API key saved in this browser";
-      $("gemini-key-status").textContent = "Key saved locally in this browser.";
-      toast("Gemini key saved");
-    });
-    $("gemini-key-clear").addEventListener("click", () => {
-      geminiApiKey = "";
-      localStorage.removeItem("geminiApiKey");
-      $("gemini-key").value = "";
-      $("gemini-key").placeholder = "Paste your Gemini API key";
-      $("gemini-key-status").textContent = "Gemini key forgotten on this browser.";
-      toast("Gemini key cleared");
-    });
     updateHelperControls();
     updateHelperButton();
     $("helper-mode").addEventListener("change", (e) => {
@@ -985,7 +965,7 @@
     return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
   }
   async function getGeminiEtymology(word, context) {
-    if (!geminiApiKey) throw new Error("Add your Gemini API key in Text settings → Gemini etymology.");
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === "PASTE_YOUR_GEMINI_API_KEY_HERE") throw new Error("Add your Gemini API key in the GEMINI_API_KEY constant near the top of app.js.");
     const prompt = `Analyze the term "${word}" in the context: "${context || word}".
 
 Use Google Search to verify etymological and medical claims. Focus on etymology as the AI-generated part, and distinguish historically attested origins from modern textbook word-part analysis. Never invent roots or claim certainty where the origin is disputed. If no reliable etymology can be verified, say so clearly.
@@ -1003,7 +983,7 @@ If this is not a medical term, use a concise equivalent: ROOTS & ORIGIN, ORIGINA
 Be rigorous and concise. Do not blindly agree with a presumed root breakdown. Include source URLs or source names at the end when available. This is educational information, not a diagnosis or substitute for clinical references.`;
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiApiKey },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY },
       body: JSON.stringify({
         model: "gemini-3.8-flash",
         input: prompt,
@@ -1033,7 +1013,7 @@ Be rigorous and concise. Do not blindly agree with a presumed root breakdown. In
       setDictionaryCopy("dictionary-etymology", cached.etymology || "No cached Gemini explanation.");
       cached.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
       $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
-      if (!cached.etymology && geminiApiKey) {
+      if (!cached.etymology && GEMINI_API_KEY && GEMINI_API_KEY !== "PASTE_YOUR_GEMINI_API_KEY_HERE") {
         try {
           const ai = await getGeminiEtymology(word, context);
           setDictionaryCopy("dictionary-etymology", ai.text);
