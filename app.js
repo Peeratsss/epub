@@ -472,8 +472,14 @@
     pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
     const doc = pdf;
     pdf.getOutline().then((o) => buildPdfTOC(doc, o)).catch(() => buildPdfTOC(doc, null));
-    await setupContinuousPdf();
-    pdfGo(pdfPage);
+    try {
+      await setupContinuousPdf();
+      await renderPdfPage(pdfPage);
+      pdfGo(pdfPage);
+      hideLoading();
+    } catch (e) {
+      if (current === meta) openFailed(e);
+    }
   }
 
   async function setupContinuousPdf() {
