@@ -784,6 +784,46 @@
   function clearHelperDoc(doc) {
     try { doc.defaultView.CSS.highlights.delete(helperHighlightName); } catch {}
   }
+
+  // Find a whole lexical token without replacing its text node. Keep common
+  // phonetic marks (including U+2032 PRIME) inside the token and include a
+  // directly enclosing pair of parentheses, e.g. "(tish′ūz)".
+  function getHelperWordRange(doc, caret) {
+    if (!caret || caret.startContainer.nodeType !== doc.defaultView.Node.TEXT_NODE) return null;
+    const node = caret.startContainer;
+    const text = node.nodeValue || "";
+    let start = Math.min(caret.startOffset, text.length);
+    let end = start;
+    const isWord = (ch) => !!ch && /[\p{L}\p{N}\p{M}\p{Pc}\p{Pd}'’′″]/u.test(ch);
+
+    // If the pointer lands on punctuation immediately beside a word, snap to it.
+    if (!isWord(text.charAt(start)) && start > 0 && isWord(text.charAt(start - 1))) start--;
+    else if (!isWord(text.charAt(start)) && isWord(text.charAt(start + 1))) start++;
+
+    if (!isWord(text.charAt(start))) return null;
+    end = start;
+    while (start > 0 && isWord(text.charAt(start - 1))) start--;
+    while (end < text.length && isWord(text.charAt(end))) end++;
+
+    // Treat a parenthesized pronunciation/gloss as one hover target.
+    if (start > 0 && end < text.length && text.charAt(start - 1) === "(" && text.charAt(end) === ")") {
+      start--;
+      end++;
+    }
+
+    const range = doc.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, end);
+    if (!range.toString().trim() || !range.getBoundingClientRect().width) return null;
+
+    // Read the original weight for formatting awareness. CSS Custom Highlights
+    // paint the existing range and inherit its typography, including bold,
+    // without changing font-weight or causing text reflow.
+    const parent = node.parentElement;
+    const weight = parent ? doc.defaultView.getComputedStyle(parent).fontWeight : "400";
+    const isBold = weight === "bold" || (Number.parseInt(weight, 10) >= 600);
+    return { range, isBold };
+  }
   function attachReadingHelper(doc) {
     if (!doc || helperDocs.has(doc)) return;
     helperDocs.add(doc);
@@ -803,18 +843,10 @@
         }
       } catch {}
       if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) { clearHelperDoc(doc); return; }
-      const node = caret.startContainer, text = node.nodeValue || "";
-      let start = caret.startOffset, end = caret.startOffset;
-      const isWord = (ch) => !!ch && /[\p{L}\p{N}_'’\-]/u.test(ch);
-      if (start > 0 && !isWord(text.charAt(start)) && isWord(text.charAt(start - 1))) start--;
-      if (!isWord(text.charAt(start))) { clearHelperDoc(doc); return; }
-      end = start;
-      while (start > 0 && isWord(text.charAt(start - 1))) start--;
-      while (end < text.length && isWord(text.charAt(end))) end++;
-      if (end <= start) { clearHelperDoc(doc); return; }
+      const word = getHelperWordRange(doc, caret);
+      if (!word) { clearHelperDoc(doc); return; }
       try {
-        const range = doc.createRange();
-        range.setStart(node, start); range.setEnd(node, end);
+        const range = word.range;
         if (!range.toString().trim() || !range.getBoundingClientRect().width) { clearHelperDoc(doc); return; }
         const HighlightClass = doc.defaultView.Highlight;
         const highlights = doc.defaultView.CSS && doc.defaultView.CSS.highlights;
@@ -861,16 +893,10 @@
       }
     } catch {}
     if (!caret || caret.startContainer.nodeType !== Node.TEXT_NODE) { clearHelperDoc(document); return; }
-    const node = caret.startContainer, text = node.nodeValue || "";
-    let start = caret.startOffset, end = caret.startOffset;
-    const isWord = (ch) => !!ch && /[\p{L}\p{N}_'’\-]/u.test(ch);
-    if (start > 0 && !isWord(text.charAt(start)) && isWord(text.charAt(start - 1))) start--;
-    if (!isWord(text.charAt(start))) { clearHelperDoc(document); return; }
-    end = start;
-    while (start > 0 && isWord(text.charAt(start - 1))) start--;
-    while (end < text.length && isWord(text.charAt(end))) end++;
+    const word = getHelperWordRange(document, caret);
+    if (!word) { clearHelperDoc(document); return; }
     try {
-      const range = document.createRange(); range.setStart(node, start); range.setEnd(node, end);
+      const range = word.range;
       const HighlightClass = window.Highlight;
       if (!HighlightClass || !CSS.highlights) { clearHelperDoc(document); return; }
       applyHelperStyle(document);
