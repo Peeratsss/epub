@@ -115,3 +115,17 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 .search-result small{display:block;opacity:.68;margin-bottom:4px}
 .search-footer{justify-content:space-between;font-size:.76rem;opacity:.6;padding-top:3px}
 @media(max-width:600px){.search-dialog{padding-top:7vh}.search-card{padding:14px}}
+
+
+/* Continuous PDF pages and clickable PDF link annotations */
+#pdfview{scroll-behavior:auto}
+#pdfpage{display:flex;flex-direction:column;align-items:center;gap:22px;min-width:100%;box-shadow:none;background:transparent}
+.pdf-page{position:relative;flex:none;margin:0 auto;background:#fff;box-shadow:var(--shadow);overflow:hidden}
+.pdf-page canvas{display:block}
+.pdf-page .hlLayer,.pdf-page .textLayer{position:absolute;inset:0}
+.pdf-page .textLayer{overflow:hidden;line-height:1;text-align:initial}
+.pdf-page .textLayer span,.pdf-page .textLayer br{position:absolute;color:transparent;white-space:pre;cursor:text;transform-origin:0 0}
+.pdf-page .textLayer ::selection{background:rgba(205,108,235,.38)}
+.pdf-page .hlLayer{pointer-events:none}
+.pdf-link{position:absolute;display:block;z-index:4;background:transparent;cursor:pointer}
+.pdf-link[href^="http"]{cursor:pointer}
