@@ -53,6 +53,7 @@
   ];
 
   let theme = store.get("theme", "light");
+  let backgroundTheme = store.get("backgroundTheme", "light");
   let fontSize = store.get("fontSize", 100);
   let fontIdx = store.get("fontIdx", 0);
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
@@ -64,6 +65,7 @@
     dark:  { body: { background: "#14111b", color: "#eee8f6" } },
   };
   if (!THEMES[theme]) theme = "light"; // e.g. the old "sepia" theme
+  if (!["light", "slate", "dark"].includes(backgroundTheme)) backgroundTheme = "light";
 
   function toast(msg) {
     const t = $("toast");
@@ -107,7 +109,8 @@
 
   /* ---------- Theme / typography ---------- */
   function applyTheme() {
-    document.body.dataset.theme = theme;
+    document.body.dataset.theme = backgroundTheme;
+    $("background-theme").value = backgroundTheme;
     $("theme").value = theme;
     if (rendition) rendition.themes.select(theme);
   }
@@ -165,7 +168,16 @@
       pdfZoom = +e.target.value / 100; store.set("pdfZoom", pdfZoom);
       if (mode === "pdf") renderPdfPage(pdfPage).catch(openFailed);
     });
-    $("theme").addEventListener("change", (e) => { theme = e.target.value; store.set("theme", theme); applyTheme(); });
+    $("theme").addEventListener("change", (e) => {
+      theme = e.target.value;
+      store.set("theme", theme);
+      if (rendition) rendition.themes.select(theme);
+    });
+    $("background-theme").addEventListener("change", (e) => {
+      backgroundTheme = e.target.value;
+      store.set("backgroundTheme", backgroundTheme);
+      document.body.dataset.theme = backgroundTheme;
+    });
   }
 
   // show only the controls that make sense for the open file type
@@ -173,6 +185,7 @@
     const isPdf = mode === "pdf";
     ["font-field", "size-field", "lh-field"].forEach((id) => ($(id).hidden = isPdf));
     $("zoom-field").hidden = !isPdf;
+    $("book-theme-field").hidden = isPdf;
     $("viewer").hidden = isPdf;
     $("pdfview").hidden = !isPdf;
     $("settings-title").textContent = isPdf ? "PDF settings" : "Text settings";
