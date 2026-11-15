@@ -794,7 +794,8 @@
     const text = node.nodeValue || "";
     let start = Math.min(caret.startOffset, text.length);
     let end = start;
-    const isWord = (ch) => !!ch && /[\p{L}\p{N}\p{M}\p{Pc}\p{Pd}'’′″]/u.test(ch);
+    // Only these three characters split a hover token: space, comma, period.
+    const isWord = (ch) => !!ch && ch !== " " && ch !== "," && ch !== ".";
 
     // If the pointer lands on punctuation immediately beside a word, snap to it.
     if (!isWord(text.charAt(start)) && start > 0 && isWord(text.charAt(start - 1))) start--;
