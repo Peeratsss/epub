@@ -986,7 +986,7 @@
     if (!response.ok) throw new Error(data.error?.message || data.error || ("Gemini proxy failed (" + response.status + ")"));
     const text = extractInteractionText(data);
     if (!text) throw new Error("Gemini returned no text. Try again.");
-    return { text, citations: extractInteractionCitations(data) };
+    return { text, citations: extractInteractionCitations(data), provider: data.provider || "Gemini", fallback: !!data.fallback };
   }
   async function lookupDictionary(rawWord, context) {
     const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
@@ -1029,7 +1029,7 @@
     const uniqueSources = sources.filter((s, i) => s.url && sources.findIndex(x => x.url === s.url) === i);
     uniqueSources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
     $("dictionary-status").textContent = referenceResult.status === "fulfilled" && aiResult.status === "fulfilled"
-      ? "Reference lookup complete · Gemini AI etymology"
+      ? "Reference lookup complete · " + (ai.provider === "OpenAI" ? "OpenAI fallback" : "Gemini AI etymology")
       : "Some sources were unavailable. Other sections may still be useful.";
     store.set(cacheKey, { description: reference.description, etymology: aiResult.status === "fulfilled" ? ai.text : "", sources: uniqueSources, savedAt: Date.now() });
   }
