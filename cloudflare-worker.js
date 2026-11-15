@@ -3,6 +3,7 @@
  *
  * Required Worker settings:
  *   Secret: GEMINI_API_KEY = your Google AI Studio API key
+ *   Secret: OPENAI_API_KEY = your OpenAI project API key (fallback)
  *   Variable: ALLOWED_ORIGIN = https://peeratsss.github.io
  *
  * Deploy this file as the Worker entry point. Do not put the Gemini key in
@@ -88,10 +89,71 @@ Be rigorous and concise. Do not blindly agree with a presumed root breakdown. In
           store: false
         })
       });
-      const data = await upstream.json().catch(() => ({}));
-      return json(data, upstream.status, allowedOrigin);
+      const geminiData = await upstream.json().catch(() => ({}));
+
+      // Only switch providers for quota/rate-limit or temporary Gemini capacity errors.
+      const geminiErrorText = JSON.stringify(geminiData.error || geminiData).toLowerCase();
+      const useFallback = [429, 503, 529].includes(upstream.status) ||
+        /resource_exhausted|quota|rate.?limit|too many requests|overloaded|capacity/.test(geminiErrorText);
+
+      if (!useFallback) return json(geminiData, upstream.status, allowedOrigin);
+
+      if (!env.OPENAI_API_KEY) {
+        return json({
+          error: {
+            message: "Gemini has reached its quota or temporary capacity limit. Add the OPENAI_API_KEY secret to this Worker to enable automatic fallback.",
+            provider: "Gemini",
+            fallbackConfigured: false
+          }
+        }, 503, allowedOrigin);
+      }
+
+      const fallback = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + env.OPENAI_API_KEY
+        },
+        body: JSON.stringify({
+          model: "gpt-6-astra",
+          tools: [{ type: "web_search" }],
+          input: prompt
+        })
+      });
+      const fallbackData = await fallback.json().catch(() => ({}));
+      if (!fallback.ok) {
+        const message = fallbackData.error?.message || "OpenAI fallback request failed (" + fallback.status + ").";
+        return json({
+          error: {
+            message: "Gemini is unavailable (" + upstream.status + ") and OpenAI fallback failed: " + message,
+            provider: "OpenAI",
+            fallbackConfigured: true
+          }
+        }, fallback.status, allowedOrigin);
+      }
+
+      const output = Array.isArray(fallbackData.output) ? fallbackData.output : [];
+      const messages = output.filter(item => item.type === "message");
+      const content = messages.flatMap(item => Array.isArray(item.content) ? item.content : []);
+      const text = content.filter(item => item.type === "output_text" && item.text)
+        .map(item => item.text).join("\\n");
+      if (!text) {
+        return json({
+          error: { message: "OpenAI fallback returned no text. Please try again.", provider: "OpenAI" }
+        }, 502, allowedOrigin);
+      }
+      const annotations = content.flatMap(item => Array.isArray(item.annotations) ? item.annotations : [])
+        .filter(item => item.url)
+        .map(item => ({ title: item.title || "Source", url: item.url }));
+
+      return json({
+        output_text: text,
+        outputs: [{ type: "text", text, annotations }],
+        provider: "OpenAI",
+        fallback: true
+      }, 200, allowedOrigin);
     } catch (error) {
-      return json({ error: { message: "Could not reach Gemini. Please try again." } }, 502, allowedOrigin);
+      return json({ error: { message: "Could not reach the AI providers. Please try again." } }, 502, allowedOrigin);
     }
   }
 };
