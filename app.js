@@ -816,7 +816,7 @@
     if (!caret || caret.startContainer.nodeType !== doc.defaultView.Node.TEXT_NODE) return null;
     const caretNode = caret.startContainer;
     let root = caretNode.parentElement;
-    const blockTags = new Set(["P","LI","TD","TH","BLOCKQUOTE","PRE","H1","H2","H3","H4","H5","H6"]);
+    const blockTags = new Set(["P","DIV","LI","TD","TH","BLOCKQUOTE","PRE","H1","H2","H3","H4","H5","H6","SECTION","ARTICLE"]);
     while (root && root !== doc.body && !blockTags.has(root.tagName) && !root.classList.contains("textLayer")) {
       root = root.parentElement;
     }
@@ -841,7 +841,7 @@
     if (caretOffset < 0 || !nodes.length) return null;
 
     const fullText = nodes.map(x => x.value).join("");
-    const isSeparator = (ch) => !ch || /[\\s,.]/u.test(ch);
+    const isSeparator = (ch) => !ch || /[\s,.]/u.test(ch);
     let pos = caretOffset;
     if (isSeparator(fullText.charAt(pos))) {
       if (!isSeparator(fullText.charAt(pos - 1))) pos--;
@@ -873,7 +873,7 @@
     const parent = caretNode.parentElement;
     const weight = parent ? doc.defaultView.getComputedStyle(parent).fontWeight : "400";
     const isBold = weight === "bold" || Number.parseInt(weight, 10) >= 600;
-    const context = fullText.slice(Math.max(0, start - 100), Math.min(fullText.length, end + 180)).replace(/\\s+/g, " ").trim();
+    const context = fullText.slice(Math.max(0, start - 100), Math.min(fullText.length, end + 180)).replace(/\s+/g, " ").trim();
     return { range, isBold, context };
   }
   function getCaretAtPoint(doc, x, y) {
@@ -931,7 +931,7 @@
   function extractInteractionText(data) {
     if (data.output_text) return data.output_text;
     const outputs = Array.isArray(data.outputs) ? data.outputs : [];
-    const outputText = outputs.filter(x => x.type === "text" && x.text).map(x => x.text).join("\\n");
+    const outputText = outputs.filter(x => x.type === "text" && x.text).map(x => x.text).join("\n");
     if (outputText) return outputText;
     const steps = Array.isArray(data.steps) ? data.steps : [];
     return steps.filter(x => x.type === "model_output").flatMap(x => x.content || [])
@@ -941,7 +941,7 @@
     const found = [];
     const add = (annotations) => (annotations || []).forEach(a => {
       const url = a.url || a.source;
-      if (url && /^https?:\\/\\//i.test(url) && !found.some(x => x.url === url)) {
+      if (url && (url.startsWith("https://") || url.startsWith("http://")) && !found.some(x => x.url === url)) {
         found.push({ title: a.title || new URL(url).hostname, url });
       }
     });
@@ -982,7 +982,7 @@
     sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
     sources.push({ title: "MedlinePlus search", url: "https://medlineplus.gov/search/?q=" + encodeURIComponent(word) });
     sources.push({ title: "PubMed search", url: "https://pubmed.ncbi.nlm.nih.gov/?term=" + encodeURIComponent(word) });
-    return { description: parts.join("\\n\\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
+    return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
   }
   async function getGeminiEtymology(word, context) {
     if (!geminiApiKey) throw new Error("Add your Gemini API key in Text settings → Gemini etymology.");
@@ -1018,7 +1018,7 @@ Be rigorous and concise. Do not blindly agree with a presumed root breakdown. In
     return { text, citations: extractInteractionCitations(data) };
   }
   async function lookupDictionary(rawWord, context) {
-    const word = String(rawWord || "").trim().replace(/^\\(+|\\)+$/g, "");
+    const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
     if (!word || word.length > 100) return;
     $("dictionary-dialog").hidden = false;
     $("dictionary-title").textContent = word;
