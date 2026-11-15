@@ -439,6 +439,7 @@
     if (pdfObserver) pdfObserver.disconnect(); pdfObserver = null;
     pdfPageNodes.clear(); pdfRendered.clear(); clearTimeout(pdfScrollTimer);
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
+    if (typeof helperDocs !== "undefined") { helperDocs.forEach(clearHelperDoc); helperDocs.clear(); }
     pendingSel = null;
     $("viewer").innerHTML = "";
     $("pdfpage").innerHTML = "";
@@ -832,7 +833,7 @@
     updateHelperButton();
     if (!helperEnabled) helperDocs.forEach(clearHelperDoc);
     else {
-      if (mode === "pdf") attachReadingHelper(document);
+      if (mode === "pdf") { helperDocs.add(document); applyHelperStyle(document); }
       else if (rendition) rendition.getContents().forEach((c) => attachReadingHelper(c.document));
     }
   }
@@ -844,7 +845,8 @@
       clearHelperDoc(document);
       return;
     }
-    attachReadingHelper(document);
+    helperDocs.add(document);
+    applyHelperStyle(document);
     // PDF text layers live in the main document; use the same word-range logic.
     let caret = null;
     try {
