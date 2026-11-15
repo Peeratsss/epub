@@ -17,6 +17,12 @@
       <div class="brand-mark" aria-hidden="true">✳</div>
       <div class="brand-copy"><strong>Library</strong></div>
       <div class="top-spacer"></div>
+      <div class="library-tools" aria-label="Library tools">
+        <button id="stats-open" class="btn" type="button">▤ Statistics</button>
+        <button id="backup-export" class="btn" type="button">↓ Backup</button>
+        <label class="btn restore-backup" for="backup-input">↑ Restore</label>
+        <input id="backup-input" type="file" accept=".json,application/json" hidden>
+      </div>
       <label class="btn primary add-book"><span>＋</span> Add book
         <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
       </label>
@@ -173,6 +179,32 @@
         <h3>Sources</h3>
         <div id="dictionary-sources" class="dictionary-sources"></div>
       </section>
+    </section>
+  </div>
+
+  <div id="stats-dialog" class="stats-dialog" hidden role="dialog" aria-modal="true" aria-label="Reading statistics">
+    <section class="stats-card">
+      <header class="stats-header">
+        <div><div class="stats-eyebrow">YOUR READING ACTIVITY</div><h2>Reading statistics</h2></div>
+        <button id="stats-close" class="btn" type="button" aria-label="Close statistics">×</button>
+      </header>
+      <div class="stats-summary">
+        <div class="stats-metric"><span>Total reading time</span><strong id="stats-total-time">0m</strong></div>
+        <div class="stats-metric"><span>Unique pages read</span><strong id="stats-total-pages">0</strong></div>
+        <div class="stats-metric"><span>Today’s reading time</span><strong id="stats-today-time">0m</strong></div>
+        <div class="stats-metric"><span>Pages read today</span><strong id="stats-today-pages">0</strong></div>
+      </div>
+      <div class="stats-columns">
+        <section class="stats-section">
+          <h3>Last 7 days</h3>
+          <div id="stats-daily"></div>
+        </section>
+        <section class="stats-section">
+          <h3>By book</h3>
+          <div id="stats-books"></div>
+        </section>
+      </div>
+      <p class="stats-footnote">Reading time counts while this reader tab is visible. Pages are counted once per book.</p>
     </section>
   </div>
 
