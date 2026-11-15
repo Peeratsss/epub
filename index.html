@@ -38,6 +38,7 @@
         <button id="notes-btn" class="btn" title="Bookmarks &amp; notes">📝</button>
         <button id="toc-btn" class="btn" title="Table of contents">☰</button>
         <button id="settings-btn" class="btn" title="Text settings">Aa</button>
+        <button id="helper-toggle" class="btn helper-toggle" type="button" title="Turn Reading Helper on or off" aria-pressed="false">◎ Helper</button>
       </div>
     </header>
 
@@ -89,6 +90,27 @@
             <option value="dark">Dark</option>
           </select>
         </label>
+        <div class="helper-settings">
+          <h4>Reading Helper</h4>
+          <label class="field">Emphasis
+            <select id="helper-mode">
+              <option value="underline">Underline</option>
+              <option value="highlight">Highlight</option>
+            </select>
+          </label>
+          <label class="field" id="helper-underline-field">Underline color
+            <input id="helper-underline-color" type="color" value="#cd6ceb">
+          </label>
+          <div id="helper-highlight-fields">
+            <label class="field">Highlight color
+              <input id="helper-bg-color" type="color" value="#fff09a">
+            </label>
+            <label class="field">Highlighted text color
+              <input id="helper-text-color" type="color" value="#292238">
+            </label>
+          </div>
+          <p class="helper-hint">Turn it on with the Helper button in the top-right corner.</p>
+        </div>
       </aside>
 
       <!-- Bookmarks & notes -->
