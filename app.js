@@ -112,6 +112,7 @@
     document.body.dataset.theme = backgroundTheme;
     $("background-theme").value = backgroundTheme;
     $("theme").value = theme;
+    $("reader").dataset.bookTheme = theme;
     if (rendition) rendition.themes.select(theme);
   }
 
@@ -168,13 +169,25 @@
       applyTypography();
     });
     $("zoom-range").addEventListener("input", (e) => { $("zoom-label").textContent = e.target.value + "%"; });
-    $("zoom-range").addEventListener("change", (e) => {
-      pdfZoom = +e.target.value / 100; store.set("pdfZoom", pdfZoom);
-      if (mode === "pdf") renderPdfPage(pdfPage).catch(openFailed);
+    $("zoom-range").addEventListener("change", async (e) => {
+      pdfZoom = +e.target.value / 100;
+      store.set("pdfZoom", pdfZoom);
+      if (mode !== "pdf" || !pdf) return;
+      const doc = pdf;
+      const page = pdfPage;
+      try {
+        await setupContinuousPdf();
+        if (doc !== pdf) return;
+        await renderPdfPage(page);
+        if (doc === pdf) pdfGo(page);
+      } catch (err) {
+        if (doc === pdf) openFailed(err);
+      }
     });
     $("theme").addEventListener("change", (e) => {
       theme = e.target.value;
       store.set("theme", theme);
+      $("reader").dataset.bookTheme = theme;
       if (rendition) rendition.themes.select(theme);
     });
     $("background-theme").addEventListener("change", (e) => {
