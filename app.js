@@ -538,7 +538,7 @@
       tl.style.setProperty("--scale-factor", vp.scale); wrap.appendChild(tl);
       const tc = await page.getTextContent();
       if (doc !== pdf) return;
-      await pdfjsLib.renderTextLayer({ textContent: tc, container: tl, viewport: vp, textDivs: [] }).promise;
+      await pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport: vp, textDivs: [] }).promise;
       drawPdfHighlights(n, wrap);
       const annotations = await page.getAnnotations();
       annotations.filter((x) => x.subtype === "Link" && x.rect).forEach((ann) => {
