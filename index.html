@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>My EPUB Reader</title>
+  <title>My Library</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="light">
@@ -11,38 +14,71 @@
   <!-- Library view -->
   <section id="library">
     <header class="bar">
-      <h1>My Library</h1>
+      <h1>My library</h1>
       <label class="btn primary">
-        + Add EPUB
-        <input id="file-input" type="file" accept=".epub,application/epub+zip" multiple hidden>
+        + Add book
+        <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
       </label>
     </header>
-    <div id="drop-hint">Drop .epub files anywhere on this page, or use “Add EPUB”.</div>
+    <div id="drop-hint">Your shelf is empty. Choose “Add book” or drop an .epub or .pdf anywhere on this page.</div>
     <div id="grid"></div>
   </section>
 
   <!-- Reader view -->
   <section id="reader" hidden>
     <header class="bar">
-      <button id="back" class="btn" title="Back to library">← Library</button>
+      <button id="back" class="btn" title="Back to library">←</button>
       <div id="book-title" class="title"></div>
       <div class="tools">
+        <button id="bm-btn" class="btn" title="Bookmark this page">☆</button>
+        <button id="notes-btn" class="btn" title="Bookmarks &amp; notes">📝</button>
         <button id="toc-btn" class="btn" title="Table of contents">☰</button>
-        <button id="font-down" class="btn" title="Smaller text">A−</button>
-        <button id="font-up" class="btn" title="Larger text">A+</button>
-        <select id="theme" class="btn" title="Theme">
-          <option value="light">Light</option>
-          <option value="sepia">Sepia</option>
-          <option value="dark">Dark</option>
-        </select>
+        <button id="settings-btn" class="btn" title="Text settings">Aa</button>
       </div>
     </header>
 
     <div id="stage">
-      <aside id="toc" hidden></aside>
+      <aside id="toc" class="panel left" hidden></aside>
+
       <button id="prev" class="nav" aria-label="Previous page">‹</button>
       <div id="viewer"></div>
+      <div id="pdfview" hidden><div id="pdfpage"></div></div>
       <button id="next" class="nav" aria-label="Next page">›</button>
+      <div id="loading" hidden>Opening book…</div>
+
+      <!-- Text settings -->
+      <aside id="settings" class="panel right" hidden>
+        <h3 id="settings-title">Text settings</h3>
+        <label class="field" id="font-field">Font
+          <select id="font-select"></select>
+        </label>
+        <label class="field" id="size-field">Font size <span id="size-label">100%</span>
+          <input id="size-range" type="range" min="70" max="220" step="5" value="100">
+        </label>
+        <label class="field" id="lh-field">Line spacing <span id="lh-label">Default</span>
+          <input id="lh-range" type="range" min="11" max="24" step="1" value="11">
+        </label>
+        <label class="field" id="zoom-field" hidden>Zoom <span id="zoom-label">100%</span>
+          <input id="zoom-range" type="range" min="50" max="300" step="10" value="100">
+        </label>
+        <label class="field">Theme
+          <select id="theme">
+            <option value="light">Light</option>
+            <option value="slate">Slate</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </aside>
+
+      <!-- Bookmarks & notes -->
+      <aside id="notes" class="panel right" hidden>
+        <div class="tabs">
+          <button id="tab-bm" class="tab active">Bookmarks</button>
+          <button id="tab-hl" class="tab">Highlights</button>
+        </div>
+        <div id="notes-list"></div>
+        <button id="export-btn" class="btn wide">Export notes (.md)</button>
+      </aside>
     </div>
 
     <footer class="bar foot">
@@ -51,10 +87,35 @@
     </footer>
   </section>
 
+  <!-- Selection toolbar (appears after selecting text in the book) -->
+  <div id="selbar" hidden>
+    <button class="swatch" data-color="#cd6ceb" style="background:#cd6ceb" title="Orchid"></button>
+    <button class="swatch" data-color="#89e21d" style="background:#89e21d" title="Lime"></button>
+    <button class="swatch" data-color="#6f9bd8" style="background:#6f9bd8" title="Blue"></button>
+    <button class="swatch" data-color="#ffd54f" style="background:#ffd54f" title="Yellow"></button>
+    <button id="sel-note" class="btn">Note</button>
+    <button id="sel-cancel" class="btn" title="Cancel">✕</button>
+  </div>
+
+  <!-- Note editor -->
+  <div id="modal" hidden>
+    <div class="modal-card">
+      <blockquote id="modal-quote"></blockquote>
+      <textarea id="modal-text" rows="5" placeholder="Write a note…"></textarea>
+      <div class="modal-actions">
+        <button id="modal-delete" class="btn danger">Delete highlight</button>
+        <span class="spacer"></span>
+        <button id="modal-cancel" class="btn">Cancel</button>
+        <button id="modal-save" class="btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" hidden></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

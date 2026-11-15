@@ -2,9 +2,14 @@
 
 A tiny personal EPUB reader that runs entirely in the browser. Built with plain HTML/CSS/JS and [epub.js](https://github.com/futurepress/epub.js) (loaded from a CDN) — no build step.
 
+- Reads **EPUB and PDF** files (PDFs open directly, with page view, zoom, outline, selectable text, bookmarks and highlights)
 - Library of books stored **in your browser** (IndexedDB) — nothing is uploaded anywhere
 - Remembers your reading position per book
-- Table of contents, progress slider, font size, light / sepia / dark themes
+- Table of contents and a progress slider
+- Text settings (**Aa**): font family, font size, line spacing, light / sepia / dark themes
+- Bookmarks (**☆**): bookmark the current page; the star fills when the page is bookmarked
+- Highlights and notes: select text, pick a colour or tap **Note**; tap a highlight to edit its note
+- **📝** panel lists all bookmarks / highlights, jump to any of them, and export them as Markdown
 - Arrow keys, on-screen buttons, or swipe to turn pages
 - Add books with the button or by drag & drop
 

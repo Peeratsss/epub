@@ -1,7 +1,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
 
-  /* ---------- IndexedDB: 'meta' (small) + 'files' (the epub bytes) ---------- */
+  /* ---------- IndexedDB: 'meta' (small) + 'files' (the book bytes) ---------- */
   function openDB() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open("epub-reader", 1);
@@ -32,19 +32,38 @@
   const deleteBook = (id) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.delete(id); f.delete(id); });
 
-  /* ---------- Settings & positions ---------- */
+  /* ---------- Settings & per-book data ---------- */
   const store = {
     get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
     set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   };
+
+  const FONTS = [
+    { name: "Book default", css: "" },
+    { name: "Georgia", css: "Georgia, serif" },
+    { name: "Palatino", css: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
+    { name: "System sans", css: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" },
+    { name: "Monospace", css: "'Courier New', monospace" },
+    { name: "Merriweather", css: "'Merriweather', serif", gf: "Merriweather" },
+    { name: "Lora", css: "'Lora', serif", gf: "Lora" },
+    { name: "Open Sans", css: "'Open Sans', sans-serif", gf: "Open+Sans" },
+    { name: "Atkinson Hyperlegible", css: "'Atkinson Hyperlegible', sans-serif", gf: "Atkinson+Hyperlegible" },
+    { name: "Noto Serif TC (中文)", css: "'Noto Serif TC', serif", gf: "Noto+Serif+TC" },
+    { name: "Noto Sans TC (中文)", css: "'Noto Sans TC', sans-serif", gf: "Noto+Sans+TC" },
+  ];
+
   let theme = store.get("theme", "light");
   let fontSize = store.get("fontSize", 100);
+  let fontIdx = store.get("fontIdx", 0);
+  let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
+  let pdfZoom = store.get("pdfZoom", 1);
 
   const THEMES = {
-    light: { body: { background: "#ffffff", color: "#222222" } },
-    sepia: { body: { background: "#f4ecd8", color: "#5b4636" } },
-    dark:  { body: { background: "#16171a", color: "#d8d8dc" } },
+    light: { body: { background: "#fcf9ff", color: "#2b2139" } },
+    slate: { body: { background: "#17243a", color: "#e8eef8" } },
+    dark:  { body: { background: "#14111b", color: "#eee8f6" } },
   };
+  if (!THEMES[theme]) theme = "light"; // e.g. the old "sepia" theme
 
   function toast(msg) {
     const t = $("toast");
@@ -53,10 +72,109 @@
     toast._t = setTimeout(() => (t.hidden = true), 3000);
   }
 
+  function withTimeout(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error((label || "operation") + " timed out")), ms)),
+    ]);
+  }
+
+  /* ---------- Loading / error overlay ---------- */
+  let loadTimer = null;
+  function showLoading(msg) { const l = $("loading"); l.textContent = msg || "Opening book…"; l.hidden = false; }
+  function hideLoading() { clearTimeout(loadTimer); $("loading").hidden = true; }
+  function openFailed(err) {
+    console.error("Open failed:", err);
+    clearTimeout(loadTimer);
+    const l = $("loading");
+    l.hidden = false;
+    l.textContent = "Couldn’t open this book" + (err && err.message ? ": " + err.message : ".") +
+      "  (Press F12 → Console for details, or go back and try another file.)";
+  }
+
+  /* ---------- Reader state ---------- */
+  let mode = null; // "epub" | "pdf"
+  let book = null, rendition = null, current = null, saveTimer = null;
+  let pdf = null, pdfPage = 1, pdfNum = 0, pdfToken = 0, pdfRender = null;
+  let tocFlat = [];
+  let bookmarks = [], anns = [];
+  let pendingSel = null, editingId = null, notesTab = "bm";
+
+  const saveBookmarks = () => store.set("bm:" + current.id, bookmarks);
+  const saveAnns = () => store.set("an:" + current.id, anns);
+  const newId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+  /* ---------- Theme / typography ---------- */
   function applyTheme() {
     document.body.dataset.theme = theme;
     $("theme").value = theme;
     if (rendition) rendition.themes.select(theme);
+  }
+
+  function typographyCSS() {
+    const f = FONTS[fontIdx] || FONTS[0];
+    let css = "";
+    if (f.gf) css += `@import url('https://fonts.googleapis.com/css2?family=${f.gf}&display=swap');\n`;
+    if (f.css) css += `body, body *:not(code):not(pre):not(kbd) { font-family: ${f.css} !important; }\n`;
+    if (lineH) css += `body, body p, body div, body li, body span { line-height: ${lineH} !important; }\n`;
+    return css;
+  }
+  function styleDoc(doc) {
+    let s = doc.getElementById("reader-typo");
+    if (!s) { s = doc.createElement("style"); s.id = "reader-typo"; doc.head.appendChild(s); }
+    s.textContent = typographyCSS();
+  }
+  function applyTypography() {
+    if (!rendition) return;
+    rendition.themes.fontSize(fontSize + "%");
+    rendition.getContents().forEach((c) => styleDoc(c.document));
+    // re-flow to the current position once the new font has had a moment to load
+    setTimeout(() => {
+      try {
+        const loc = rendition.currentLocation();
+        if (loc && loc.start) rendition.display(loc.start.cfi);
+      } catch {}
+    }, 250);
+  }
+
+  function initSettingsUI() {
+    const sel = $("font-select");
+    FONTS.forEach((f, i) => { const o = document.createElement("option"); o.value = i; o.textContent = f.name; sel.appendChild(o); });
+    sel.value = fontIdx;
+    $("size-range").value = fontSize; $("size-label").textContent = fontSize + "%";
+    $("lh-range").value = lineH ? Math.round(lineH * 10) : 11;
+    $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
+    $("zoom-range").value = Math.round(pdfZoom * 100); $("zoom-label").textContent = Math.round(pdfZoom * 100) + "%";
+
+    sel.addEventListener("change", () => { fontIdx = +sel.value; store.set("fontIdx", fontIdx); applyTypography(); });
+    $("size-range").addEventListener("input", (e) => {
+      fontSize = +e.target.value; $("size-label").textContent = fontSize + "%";
+      store.set("fontSize", fontSize);
+      if (rendition) rendition.themes.fontSize(fontSize + "%");
+    });
+    $("lh-range").addEventListener("input", (e) => {
+      const v = +e.target.value;
+      lineH = v <= 11 ? 0 : v / 10;
+      $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
+      store.set("lineH", lineH);
+      applyTypography();
+    });
+    $("zoom-range").addEventListener("input", (e) => { $("zoom-label").textContent = e.target.value + "%"; });
+    $("zoom-range").addEventListener("change", (e) => {
+      pdfZoom = +e.target.value / 100; store.set("pdfZoom", pdfZoom);
+      if (mode === "pdf") renderPdfPage(pdfPage).catch(openFailed);
+    });
+    $("theme").addEventListener("change", (e) => { theme = e.target.value; store.set("theme", theme); applyTheme(); });
+  }
+
+  // show only the controls that make sense for the open file type
+  function setModeUI() {
+    const isPdf = mode === "pdf";
+    ["font-field", "size-field", "lh-field"].forEach((id) => ($(id).hidden = isPdf));
+    $("zoom-field").hidden = !isPdf;
+    $("viewer").hidden = isPdf;
+    $("pdfview").hidden = !isPdf;
+    $("settings-title").textContent = isPdf ? "PDF settings" : "Text settings";
   }
 
   /* ---------- Library ---------- */
@@ -64,25 +182,59 @@
     return new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
   }
 
+  async function pdfMeta(data) {
+    const doc = await withTimeout(pdfjsLib.getDocument({ data: new Uint8Array(data.slice(0)) }).promise, 60000, "reading PDF");
+    let title = "", author = "", cover = "";
+    try {
+      const m = await doc.getMetadata();
+      title = (m.info && m.info.Title) || ""; author = (m.info && m.info.Author) || "";
+    } catch {}
+    try {
+      const page = await doc.getPage(1);
+      const vp0 = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: 300 / vp0.width });
+      const c = document.createElement("canvas");
+      c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      await withTimeout(page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise, 20000, "rendering cover");
+      cover = c.toDataURL("image/jpeg", 0.7);
+    } catch (e) { console.warn("pdf cover failed", e); }
+    try { doc.destroy(); } catch {}
+    return { title, author, cover };
+  }
+
   async function addFile(file) {
-    if (!/\.epub$/i.test(file.name)) { toast(`${file.name} is not an .epub`); return; }
+    const isPdf = /\.pdf$/i.test(file.name);
+    const isEpub = /\.epub$/i.test(file.name);
+    if (!isPdf && !isEpub) { toast(`${file.name} is not an .epub or .pdf`); return; }
+    if (isPdf && typeof pdfjsLib === "undefined") { toast("PDF engine didn’t load. Check your internet connection and refresh."); return; }
     const id = `${file.name}-${file.size}`;
     const data = await file.arrayBuffer();
-    let title = file.name.replace(/\.epub$/i, ""), author = "", cover = "";
+    let title = file.name.replace(/\.(epub|pdf)$/i, ""), author = "", cover = "";
     try {
-      const b = ePub(data.slice(0));
-      const md = await b.loaded.metadata;
-      title = md.title || title;
-      author = md.creator || "";
-      const url = await b.coverUrl();
-      if (url) cover = await blobToDataURL(await (await fetch(url)).blob());
-      b.destroy();
+      if (isPdf) {
+        const m = await pdfMeta(data);
+        if (m.title && m.title.trim()) title = m.title.trim();
+        author = m.author; cover = m.cover;
+      } else {
+        const b = ePub(data.slice(0));
+        const md = await withTimeout(b.loaded.metadata, 15000, "reading metadata");
+        title = md.title || title;
+        author = md.creator || "";
+        try {
+          const url = await withTimeout(b.coverUrl(), 8000, "loading cover");
+          if (url) cover = await blobToDataURL(await (await fetch(url)).blob());
+        } catch (e) { console.warn("cover failed", e); }
+        b.destroy();
+      }
     } catch (e) { console.warn("metadata failed", e); }
-    await saveBook({ id, title, author, cover, added: Date.now() }, data);
+    await saveBook({ id, type: isPdf ? "pdf" : "epub", title, author, cover, added: Date.now() }, data);
   }
 
   async function addFiles(files) {
-    for (const f of files) await addFile(f);
+    toast("Adding book…");
+    for (const f of files) {
+      try { await addFile(f); } catch (e) { console.error(e); toast(`Couldn’t add ${f.name}: ${e.message || e}`); }
+    }
     renderLibrary();
   }
 
@@ -90,7 +242,7 @@
     const books = (await getAllMeta()).sort((a, b) => b.added - a.added);
     const grid = $("grid");
     grid.innerHTML = "";
-    $("drop-hint").hidden = books.length > 0 ? true : false;
+    $("drop-hint").hidden = books.length > 0;
     for (const b of books) {
       const card = document.createElement("div");
       card.className = "card";
@@ -99,64 +251,107 @@
         <div class="cover"></div>
         <div class="name"></div>
         <div class="author"></div>
+        <div class="prog"><i></i></div>
         <div class="pct"></div>
         <button class="del" title="Remove">×</button>`;
       const cover = card.querySelector(".cover");
       if (b.cover) cover.style.backgroundImage = `url("${b.cover}")`; else cover.textContent = b.title;
       card.querySelector(".name").textContent = b.title;
-      card.querySelector(".author").textContent = b.author;
-      if (pos && pos.pct != null) card.querySelector(".pct").textContent = `${pos.pct}% read`;
+      card.querySelector(".author").textContent = (b.type === "pdf" ? "PDF" : "EPUB") + (b.author ? " · " + b.author : "");
+      if (pos && pos.pct != null) {
+        card.querySelector(".pct").textContent = `${pos.pct}% read`;
+        card.style.setProperty("--p", Math.min(100, Math.max(0, pos.pct)) + "%");
+      }
       card.addEventListener("click", () => openBook(b));
       card.querySelector(".del").addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (confirm(`Remove “${b.title}” from your library?`)) {
+        if (confirm(`Remove “${b.title}” from your library? Its bookmarks and notes will be deleted too.`)) {
           await deleteBook(b.id);
-          localStorage.removeItem("pos:" + b.id);
+          ["pos:", "bm:", "an:", "loc:"].forEach((p) => localStorage.removeItem(p + b.id));
           renderLibrary();
         }
       });
       grid.appendChild(card);
     }
-    if (!books.length) $("drop-hint").hidden = false;
   }
 
-  /* ---------- Reader ---------- */
-  let book = null, rendition = null, current = null, saveTimer = null;
-
+  /* ---------- Open / close ---------- */
   async function openBook(meta) {
     const rec = await getFile(meta.id);
     if (!rec) { toast("Book data missing"); return; }
     closeBook();
     current = meta;
+    bookmarks = store.get("bm:" + meta.id, []);
+    anns = store.get("an:" + meta.id, []);
     $("library").hidden = true;
     $("reader").hidden = false;
     $("book-title").textContent = meta.title;
+    if (meta.type === "pdf") return openPdf(meta, rec);
+    return openEpub(meta, rec);
+  }
+
+  function openEpub(meta, rec) {
+    mode = "epub"; setModeUI();
+    if (typeof ePub === "undefined") { openFailed(new Error("EPUB engine didn’t load. Check your internet connection and refresh.")); return; }
+    showLoading();
+    loadTimer = setTimeout(() => showLoading("Still opening… large books can take a while. If nothing happens, press F12 and check the Console for errors."), 15000);
 
     book = ePub(rec.data);
+    book.opened.catch(openFailed);
     rendition = book.renderTo("viewer", {
       width: "100%", height: "100%", flow: "paginated", spread: "auto", allowScriptedContent: false,
     });
     for (const [name, rules] of Object.entries(THEMES)) rendition.themes.register(name, rules);
     rendition.themes.fontSize(fontSize + "%");
+    rendition.hooks.content.register((contents) => styleDoc(contents.document));
     applyTheme();
 
+    anns.forEach(drawAnn);
+
     const saved = store.get("pos:" + meta.id, null);
-    rendition.display(saved && saved.cfi ? saved.cfi : undefined);
+    rendition.on("rendered", hideLoading);
+    rendition.display(saved && saved.cfi ? saved.cfi : undefined).catch((err) => {
+      // a saved position can become invalid; fall back to the start of the book
+      console.warn("display failed, retrying from start", err);
+      rendition.display().catch(openFailed);
+    });
 
-    book.loaded.navigation.then((nav) => buildTOC(nav.toc));
+    book.loaded.navigation.then((nav) => {
+      buildTOC(nav.toc);
+      tocFlat = [];
+      (function walk(list) { list.forEach((i) => { tocFlat.push(i); if (i.subitems) walk(i.subitems); }); })(nav.toc);
+      renderNotes();
+    });
 
-    book.ready.then(() => book.locations.generate(1200)).then(() => {
+    // page-count/progress data: reuse a saved copy, otherwise build it after the first page is showing
+    const bk = book;
+    book.ready.then(() => {
+      const cached = store.get("loc:" + meta.id, null);
+      if (cached) { bk.locations.load(cached); return; }
+      return new Promise((r) => setTimeout(r, 1500))
+        .then(() => (book === bk ? bk.locations.generate(2000) : null))
+        .then(() => { if (book === bk) store.set("loc:" + meta.id, bk.locations.save()); });
+    }).then(() => {
+      if (book !== bk) return;
       const loc = rendition.currentLocation();
       if (loc && loc.start) updateProgress(loc);
-    });
+      renderNotes();
+    }).catch((e) => console.warn("progress data failed", e));
 
     rendition.on("relocated", (loc) => {
       updateProgress(loc);
+      updateBmStar();
+      hideSelbar();
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
-        const pct = book.locations.length() ? Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100) : (saved?.pct ?? 0);
+        const pct = pctAt(loc.start.cfi) ?? (saved?.pct ?? 0);
         store.set("pos:" + meta.id, { cfi: loc.start.cfi, pct });
       }, 300);
+    });
+
+    rendition.on("selected", (cfiRange, contents) => {
+      pendingSel = { cfiRange, contents };
+      $("selbar").hidden = false;
     });
 
     // keys + swipe inside the book iframe
@@ -166,16 +361,59 @@
     rendition.on("touchend", (e) => {
       if (sx === null) return;
       const dx = e.changedTouches[0].screenX - sx;
-      if (Math.abs(dx) > 50) (dx < 0 ? rendition.next() : rendition.prev());
+      const sel = e.view && e.view.getSelection ? e.view.getSelection().toString() : "";
+      if (Math.abs(dx) > 50 && !sel) (dx < 0 ? rendition.next() : rendition.prev());
       sx = null;
     });
   }
 
+  function closeBook() {
+    clearTimeout(saveTimer);
+    hideLoading();
+    pdfToken++;
+    try { if (pdfRender) pdfRender.cancel(); } catch {}
+    try { if (pdf) pdf.destroy(); } catch {}
+    try { if (rendition) rendition.destroy(); if (book) book.destroy(); } catch {}
+    rendition = null; book = null; pdf = null; pdfRender = null; pdfNum = 0; pdfPage = 1;
+    current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
+    pendingSel = null;
+    $("viewer").innerHTML = "";
+    $("pdfpage").innerHTML = "";
+    $("toc").innerHTML = "";
+    setModeUI(); $("pdfview").hidden = true; $("viewer").hidden = false;
+    hidePanels(); hideSelbar();
+    setSlider(0, 100, 0); $("progress-text").textContent = "0%";
+    $("bm-btn").textContent = "☆"; $("bm-btn").classList.remove("on");
+  }
+
+  function setSlider(min, max, val) {
+    const s = $("progress");
+    s.min = min; s.max = max; s.value = val;
+  }
+
+  /* ---------- EPUB helpers ---------- */
+  function pctAt(cfi) {
+    try {
+      if (book && book.locations.length()) return Math.round(book.locations.percentageFromCfi(cfi) * 100);
+    } catch {}
+    return null;
+  }
+
   function updateProgress(loc) {
-    if (!book || !book.locations.length()) return;
-    const p = Math.round(book.locations.percentageFromCfi(loc.start.cfi) * 100);
+    const p = pctAt(loc.start.cfi);
+    if (p == null) return;
     $("progress").value = p;
     $("progress-text").textContent = p + "%";
+  }
+
+  function chapterOf(href) {
+    if (!href) return "";
+    const h = href.split("#")[0];
+    const hit = tocFlat.find((i) => {
+      const t = (i.href || "").split("#")[0];
+      return t === h || t.endsWith(h) || h.endsWith(t);
+    });
+    return hit ? hit.label.trim() : "";
   }
 
   function buildTOC(items) {
@@ -199,25 +437,400 @@
     add(items, 0);
   }
 
-  function closeBook() {
-    clearTimeout(saveTimer);
-    try { if (rendition) rendition.destroy(); if (book) book.destroy(); } catch {}
-    rendition = null; book = null; current = null;
-    $("viewer").innerHTML = "";
-    $("toc").hidden = true;
-    $("progress").value = 0; $("progress-text").textContent = "0%";
+  /* ---------- PDF ---------- */
+  async function openPdf(meta, rec) {
+    mode = "pdf"; setModeUI(); applyTheme();
+    if (typeof pdfjsLib === "undefined") { openFailed(new Error("PDF engine didn’t load. Check your internet connection and refresh.")); return; }
+    showLoading("Opening PDF…");
+    loadTimer = setTimeout(() => showLoading("Still opening… large PDFs can take a while. If nothing happens, press F12 and check the Console for errors."), 20000);
+    try {
+      pdf = await pdfjsLib.getDocument({ data: new Uint8Array(rec.data) }).promise;
+    } catch (e) { if (current === meta) openFailed(e); return; }
+    if (current !== meta) { try { pdf.destroy(); } catch {} return; }
+    pdfNum = pdf.numPages;
+    const saved = store.get("pos:" + meta.id, null);
+    pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
+    const doc = pdf;
+    pdf.getOutline().then((o) => buildPdfTOC(doc, o)).catch(() => buildPdfTOC(doc, null));
+    pdfGo(pdfPage);
   }
+
+  async function renderPdfPage(n) {
+    const token = ++pdfToken;
+    const page = await pdf.getPage(n);
+    if (token !== pdfToken) return;
+    const view = $("pdfview");
+    const w1 = page.getViewport({ scale: 1 }).width;
+    const base = Math.min(view.clientWidth - 24, 900) / w1;
+    const vp = page.getViewport({ scale: Math.max(base, 0.1) * pdfZoom });
+    const dpr = window.devicePixelRatio || 1;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.floor(vp.width * dpr); canvas.height = Math.floor(vp.height * dpr);
+    canvas.style.width = vp.width + "px"; canvas.style.height = vp.height + "px";
+
+    try { if (pdfRender) pdfRender.cancel(); } catch {}
+    pdfRender = page.render({
+      canvasContext: canvas.getContext("2d"), viewport: vp,
+      transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+    });
+    try { await pdfRender.promise; }
+    catch (e) { if (e && e.name === "RenderingCancelledException") return; throw e; }
+    if (token !== pdfToken) return;
+
+    const wrap = $("pdfpage");
+    wrap.innerHTML = "";
+    wrap.style.width = vp.width + "px"; wrap.style.height = vp.height + "px";
+    wrap.appendChild(canvas);
+    const hl = document.createElement("div"); hl.className = "hlLayer"; wrap.appendChild(hl);
+    const tl = document.createElement("div"); tl.className = "textLayer";
+    tl.style.setProperty("--scale-factor", vp.scale);
+    wrap.appendChild(tl);
+    drawPdfHighlights();
+    hideLoading();
+
+    // selectable text on top (added after the page is visible so page turns feel instant)
+    try {
+      const tc = await page.getTextContent();
+      if (token !== pdfToken) return;
+      await pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport: vp, textDivs: [] }).promise;
+    } catch (e) { console.warn("text layer failed", e); }
+  }
+
+  async function pdfGo(n) {
+    if (!pdf) return;
+    n = Math.min(Math.max(Math.round(n), 1), pdfNum);
+    pdfPage = n;
+    updatePdfUI();
+    hideSelbar();
+    try { await renderPdfPage(n); } catch (e) { openFailed(e); return; }
+    const view = $("pdfview");
+    view.scrollTop = 0;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (current) store.set("pos:" + current.id, { page: pdfPage, pct: Math.round((pdfPage / pdfNum) * 100) });
+    }, 300);
+  }
+
+  function updatePdfUI() {
+    setSlider(1, pdfNum, pdfPage);
+    $("progress-text").textContent = `${pdfPage} / ${pdfNum}`;
+    updateBmStar();
+  }
+
+  async function resolvePdfDest(doc, dest) {
+    let d = dest;
+    if (typeof d === "string") d = await doc.getDestination(d);
+    if (!Array.isArray(d)) return null;
+    const ref = d[0];
+    if (ref && typeof ref === "object") return (await doc.getPageIndex(ref)) + 1;
+    if (Number.isInteger(ref)) return ref + 1;
+    return null;
+  }
+
+  async function buildPdfTOC(doc, items) {
+    const toc = $("toc");
+    if (pdf !== doc) return;
+    if (!items || !items.length) { toc.innerHTML = '<div class="empty">This PDF has no table of contents.</div>'; return; }
+    toc.innerHTML = "";
+    const flat = [];
+    (function walk(list, d) { list.forEach((it) => { flat.push({ it, d }); if (it.items && it.items.length) walk(it.items, d + 1); }); })(items, 0);
+    flat.forEach(({ it, d }) => {
+      const a = document.createElement("a");
+      a.href = "#";
+      a.textContent = (it.title || "").trim() || "(untitled)";
+      a.style.paddingLeft = 16 + d * 14 + "px";
+      a.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try {
+          const p = it._page ?? (await resolvePdfDest(doc, it.dest));
+          if (p) { pdfGo(p); toc.hidden = true; }
+        } catch (err) { console.warn(err); }
+      });
+      toc.appendChild(a);
+    });
+    // resolve target pages in the background so bookmarks/notes can show chapter names
+    const list = [];
+    for (const { it } of flat) {
+      if (pdf !== doc) return;
+      try { it._page = await resolvePdfDest(doc, it.dest); } catch {}
+      if (it._page) list.push({ label: (it.title || "").trim(), page: it._page });
+    }
+    if (pdf !== doc) return;
+    list.sort((a, b) => a.page - b.page);
+    tocFlat = list;
+    renderNotes();
+  }
+
+  function pdfChapterOf(page) {
+    let label = "";
+    for (const t of tocFlat) { if (t.page <= page) label = t.label; else break; }
+    return label;
+  }
+
+  function drawPdfHighlights() {
+    const layer = $("pdfpage").querySelector(".hlLayer");
+    if (!layer) return;
+    layer.innerHTML = "";
+    anns.filter((a) => a.page === pdfPage && a.rects).forEach((a) => a.rects.forEach((r) => {
+      const d = document.createElement("div");
+      d.className = "hl-rect";
+      d.style.cssText = `left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${r.h * 100}%;background:${a.color}`;
+      layer.appendChild(d);
+    }));
+  }
+
+  // text selection on a PDF page -> show the highlight bar
+  let selTimer = null;
+  document.addEventListener("selectionchange", () => {
+    if (mode !== "pdf") return;
+    clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      const sel = window.getSelection();
+      const pageEl = $("pdfpage");
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !pageEl.contains(sel.anchorNode)) {
+        if (pendingSel && pendingSel.pdf) hideSelbar();
+        return;
+      }
+      const text = sel.toString().trim().replace(/\s+/g, " ");
+      if (!text) return;
+      const wr = pageEl.getBoundingClientRect();
+      const rects = [...sel.getRangeAt(0).getClientRects()]
+        .map((r) => ({ x: (r.left - wr.left) / wr.width, y: (r.top - wr.top) / wr.height, w: r.width / wr.width, h: r.height / wr.height }))
+        .filter((r) => r.w > 0.002 && r.h > 0.002 && r.h < 0.06 && r.w < 0.98);
+      if (!rects.length) return;
+      pendingSel = { pdf: true, page: pdfPage, rects, text };
+      $("selbar").hidden = false;
+    }, 250);
+  });
+
+  // click a PDF highlight to open its note
+  $("pdfpage").addEventListener("click", (e) => {
+    if (window.getSelection().toString()) return;
+    const wr = $("pdfpage").getBoundingClientRect();
+    const x = (e.clientX - wr.left) / wr.width, y = (e.clientY - wr.top) / wr.height;
+    const hit = anns.find((a) => a.page === pdfPage && a.rects && a.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h));
+    if (hit) openNote(hit.id);
+  });
+
+  // swipe to turn pages on touch screens (only when the page isn't zoomed wider than the screen)
+  let psx = null, psy = null;
+  $("pdfview").addEventListener("touchstart", (e) => {
+    if (e.touches.length === 1) { psx = e.touches[0].clientX; psy = e.touches[0].clientY; } else psx = null;
+  }, { passive: true });
+  $("pdfview").addEventListener("touchend", (e) => {
+    if (psx === null || mode !== "pdf") return;
+    const dx = e.changedTouches[0].clientX - psx, dy = e.changedTouches[0].clientY - psy;
+    psx = null;
+    const v = $("pdfview");
+    if (window.getSelection().toString() || v.scrollWidth > v.clientWidth + 4) return;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) pdfGo(pdfPage + (dx < 0 ? 1 : -1));
+  });
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (mode !== "pdf" || !pdf) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => renderPdfPage(pdfPage).catch(() => {}), 250);
+  });
+
+  /* ---------- Panels ---------- */
+  function hidePanels() { ["toc", "settings", "notes"].forEach((p) => ($(p).hidden = true)); }
+  function togglePanel(id) {
+    const show = $(id).hidden;
+    hidePanels();
+    $(id).hidden = !show;
+    if (id === "notes" && show) renderNotes();
+  }
+
+  /* ---------- Bookmarks ---------- */
+  function bookmarkOnPage() {
+    if (mode === "pdf") return bookmarks.filter((b) => b.page === pdfPage);
+    const loc = rendition && rendition.currentLocation();
+    if (!loc || !loc.start) return [];
+    const c = new ePub.CFI();
+    return bookmarks.filter((b) => {
+      try { return c.compare(b.cfi, loc.start.cfi) >= 0 && c.compare(b.cfi, loc.end.cfi) <= 0; }
+      catch { return b.cfi === loc.start.cfi; }
+    });
+  }
+  function updateBmStar() {
+    const on = bookmarkOnPage().length > 0;
+    $("bm-btn").textContent = on ? "★" : "☆";
+    $("bm-btn").classList.toggle("on", on);
+  }
+  function toggleBookmark() {
+    if (!mode) return;
+    const here = bookmarkOnPage();
+    if (here.length) {
+      bookmarks = bookmarks.filter((b) => !here.includes(b));
+      toast("Bookmark removed");
+    } else if (mode === "pdf") {
+      bookmarks.push({
+        id: newId("b"), page: pdfPage,
+        label: pdfChapterOf(pdfPage) || `Page ${pdfPage}`,
+        pct: Math.round((pdfPage / pdfNum) * 100), added: Date.now(),
+      });
+      toast("Bookmarked");
+    } else {
+      const loc = rendition.currentLocation();
+      if (!loc || !loc.start) return;
+      bookmarks.push({
+        id: newId("b"), cfi: loc.start.cfi,
+        label: chapterOf(loc.start.href) || "Bookmark",
+        pct: pctAt(loc.start.cfi), added: Date.now(),
+      });
+      toast("Bookmarked");
+    }
+    saveBookmarks(); updateBmStar(); renderNotes();
+  }
+
+  /* ---------- Highlights & notes ---------- */
+  function drawAnn(a) {
+    rendition.annotations.highlight(
+      a.cfiRange, { id: a.id }, () => openNote(a.id), "hl",
+      { fill: a.color, "fill-opacity": "0.35", "mix-blend-mode": "multiply" }
+    );
+  }
+  function hideSelbar() { $("selbar").hidden = true; pendingSel = null; }
+
+  function createAnn(color, thenNote) {
+    if (!pendingSel) return;
+    let a;
+    if (pendingSel.pdf) {
+      const { page, rects, text } = pendingSel;
+      a = {
+        id: newId("a"), page, rects, text, color, note: "",
+        chapter: pdfChapterOf(page), pct: Math.round((page / pdfNum) * 100), added: Date.now(),
+      };
+      anns.push(a); saveAnns(); drawPdfHighlights();
+      try { window.getSelection().removeAllRanges(); } catch {}
+    } else {
+      if (!rendition) return;
+      const { cfiRange, contents } = pendingSel;
+      let text = "";
+      try { text = rendition.getRange(cfiRange).toString().trim().replace(/\s+/g, " "); } catch {}
+      const loc = rendition.currentLocation();
+      a = {
+        id: newId("a"), cfiRange, text, color, note: "",
+        chapter: chapterOf(loc && loc.start && loc.start.href),
+        pct: loc && loc.start ? pctAt(loc.start.cfi) : null,
+        added: Date.now(),
+      };
+      anns.push(a); saveAnns(); drawAnn(a);
+      try { contents.window.getSelection().removeAllRanges(); } catch {}
+    }
+    hideSelbar(); renderNotes();
+    if (thenNote) openNote(a.id);
+  }
+
+  function openNote(id) {
+    const a = anns.find((x) => x.id === id);
+    if (!a) return;
+    editingId = id;
+    $("modal-quote").textContent = a.text;
+    $("modal-text").value = a.note || "";
+    $("modal").hidden = false;
+    $("modal-text").focus();
+  }
+  function closeNote() { $("modal").hidden = true; editingId = null; }
+  function removeAnn(id) {
+    const a = anns.find((x) => x.id === id);
+    if (!a) return;
+    if (a.cfiRange) { try { rendition.annotations.remove(a.cfiRange, "highlight"); } catch {} }
+    anns = anns.filter((x) => x.id !== id);
+    saveAnns(); renderNotes();
+    if (mode === "pdf") drawPdfHighlights();
+  }
+
+  /* ---------- Bookmarks / highlights panel ---------- */
+  const sortKey = (x) => x.page ?? x.pct ?? 0;
+  const posText = (x) => (x.page ? `p. ${x.page}` : x.pct != null ? x.pct + "%" : "");
+
+  function renderNotes() {
+    const list = $("notes-list");
+    if (!list) return;
+    list.innerHTML = "";
+    $("tab-bm").classList.toggle("active", notesTab === "bm");
+    $("tab-hl").classList.toggle("active", notesTab === "hl");
+
+    const go = (item) => {
+      if (mode === "pdf") pdfGo(item.page);
+      else if (rendition) rendition.display(item.cfi || item.cfiRange);
+      $("notes").hidden = true;
+    };
+    const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+    const when = (t) => new Date(t).toLocaleDateString();
+
+    if (notesTab === "bm") {
+      if (!bookmarks.length) list.appendChild(mk("div", "empty", "No bookmarks yet. Tap ☆ in the top bar to add one."));
+      [...bookmarks].sort((a, b) => sortKey(a) - sortKey(b)).forEach((b) => {
+        const row = mk("div", "item");
+        const body = mk("div", "body");
+        body.appendChild(mk("div", "quote", b.label));
+        body.appendChild(mk("div", "meta", `${posText(b) ? posText(b) + " · " : ""}${when(b.added)}`));
+        const x = mk("button", "x", "×"); x.title = "Delete";
+        x.addEventListener("click", (e) => { e.stopPropagation(); bookmarks = bookmarks.filter((y) => y.id !== b.id); saveBookmarks(); updateBmStar(); renderNotes(); });
+        row.append(body, x);
+        row.addEventListener("click", () => go(b));
+        list.appendChild(row);
+      });
+    } else {
+      if (!anns.length) list.appendChild(mk("div", "empty", "No highlights yet. Select text to highlight it or add a note."));
+      [...anns].sort((a, b) => sortKey(a) - sortKey(b)).forEach((a) => {
+        const row = mk("div", "item");
+        const dot = mk("span", "dot"); dot.style.background = a.color;
+        const body = mk("div", "body");
+        body.appendChild(mk("div", "meta", [a.chapter, posText(a)].filter(Boolean).join(" · ")));
+        body.appendChild(mk("div", "quote", a.text.length > 180 ? a.text.slice(0, 180) + "…" : a.text));
+        if (a.note) body.appendChild(mk("div", "note", a.note));
+        const edit = mk("button", "x", "✎"); edit.title = "Edit note";
+        edit.addEventListener("click", (e) => { e.stopPropagation(); openNote(a.id); });
+        const x = mk("button", "x", "×"); x.title = "Delete";
+        x.addEventListener("click", (e) => { e.stopPropagation(); removeAnn(a.id); });
+        row.append(dot, body, edit, x);
+        row.addEventListener("click", () => go(a));
+        list.appendChild(row);
+      });
+    }
+  }
+
+  function exportNotes() {
+    if (!current) return;
+    const lines = [`# ${current.title}`, current.author ? `*${current.author}*` : "", ""];
+    if (bookmarks.length) {
+      lines.push("## Bookmarks", "");
+      [...bookmarks].sort((a, b) => sortKey(a) - sortKey(b))
+        .forEach((b) => lines.push(`- ${b.label}${posText(b) ? ` (${posText(b)})` : ""}`));
+      lines.push("");
+    }
+    if (anns.length) {
+      lines.push("## Highlights & notes", "");
+      [...anns].sort((a, b) => sortKey(a) - sortKey(b)).forEach((a) => {
+        lines.push(`> ${a.text}`);
+        lines.push([a.chapter, posText(a) ? `(${posText(a)})` : ""].filter(Boolean).join(" "));
+        if (a.note) lines.push("", `**Note:** ${a.note}`);
+        lines.push("");
+      });
+    }
+    if (!bookmarks.length && !anns.length) { toast("Nothing to export yet"); return; }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = current.title.replace(/[\\/:*?"<>|]+/g, "_") + "-notes.md";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  /* ---------- Navigation & keys ---------- */
+  function goNext() { if (mode === "pdf") pdfGo(pdfPage + 1); else if (rendition) rendition.next(); }
+  function goPrev() { if (mode === "pdf") pdfGo(pdfPage - 1); else if (rendition) rendition.prev(); }
 
   function handleKey(e) {
-    if (!rendition || $("reader").hidden) return;
-    if (e.key === "ArrowRight" || e.key === "PageDown") rendition.next();
-    else if (e.key === "ArrowLeft" || e.key === "PageUp") rendition.prev();
-  }
-
-  function setFont(delta) {
-    fontSize = Math.min(220, Math.max(70, fontSize + delta));
-    store.set("fontSize", fontSize);
-    if (rendition) rendition.themes.fontSize(fontSize + "%");
+    if (!mode || $("reader").hidden || !$("modal").hidden) return;
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === "ArrowRight" || e.key === "PageDown") goNext();
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") goPrev();
   }
 
   /* ---------- Wire up UI ---------- */
@@ -227,17 +840,44 @@
     $("reader").hidden = true; $("library").hidden = false;
     renderLibrary();
   });
-  $("prev").addEventListener("click", () => rendition && rendition.prev());
-  $("next").addEventListener("click", () => rendition && rendition.next());
-  $("toc-btn").addEventListener("click", () => ($("toc").hidden = !$("toc").hidden));
-  $("font-up").addEventListener("click", () => setFont(10));
-  $("font-down").addEventListener("click", () => setFont(-10));
-  $("theme").addEventListener("change", (e) => { theme = e.target.value; store.set("theme", theme); applyTheme(); });
+  $("prev").addEventListener("click", goPrev);
+  $("next").addEventListener("click", goNext);
+  $("toc-btn").addEventListener("click", () => togglePanel("toc"));
+  $("settings-btn").addEventListener("click", () => togglePanel("settings"));
+  $("notes-btn").addEventListener("click", () => togglePanel("notes"));
+  $("bm-btn").addEventListener("click", toggleBookmark);
+  $("tab-bm").addEventListener("click", () => { notesTab = "bm"; renderNotes(); });
+  $("tab-hl").addEventListener("click", () => { notesTab = "hl"; renderNotes(); });
+  $("export-btn").addEventListener("click", exportNotes);
+
+  // keep the text selection alive while pressing the highlight bar's buttons
+  $("selbar").addEventListener("mousedown", (e) => e.preventDefault());
+  document.querySelectorAll("#selbar .swatch").forEach((s) =>
+    s.addEventListener("click", () => createAnn(s.dataset.color, false)));
+  $("sel-note").addEventListener("click", () => createAnn("#cd6ceb", true));
+  $("sel-cancel").addEventListener("click", () => {
+    try {
+      if (pendingSel && pendingSel.pdf) window.getSelection().removeAllRanges();
+      else if (pendingSel) pendingSel.contents.window.getSelection().removeAllRanges();
+    } catch {}
+    hideSelbar();
+  });
+
+  $("modal-save").addEventListener("click", () => {
+    const a = anns.find((x) => x.id === editingId);
+    if (a) { a.note = $("modal-text").value.trim(); saveAnns(); renderNotes(); }
+    closeNote();
+  });
+  $("modal-cancel").addEventListener("click", closeNote);
+  $("modal-delete").addEventListener("click", () => { if (editingId) removeAnn(editingId); closeNote(); });
+  $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeNote(); });
+
+  $("progress").addEventListener("input", (e) => {
+    if (mode === "pdf") $("progress-text").textContent = `${e.target.value} / ${pdfNum}`;
+  });
   $("progress").addEventListener("change", (e) => {
-    if (book && book.locations.length()) {
-      const cfi = book.locations.cfiFromPercentage(e.target.value / 100);
-      rendition.display(cfi);
-    }
+    if (mode === "pdf") pdfGo(+e.target.value);
+    else if (book && book.locations.length()) rendition.display(book.locations.cfiFromPercentage(e.target.value / 100));
   });
   document.addEventListener("keyup", handleKey);
 
@@ -251,6 +891,11 @@
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   });
 
+  if (typeof pdfjsLib !== "undefined") {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+
+  initSettingsUI();
   applyTheme();
   renderLibrary();
 })();
