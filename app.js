@@ -60,6 +60,7 @@
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
   let pdfZoom = store.get("pdfZoom", 1);
   let helperEnabled = store.get("helperEnabled", false);
+  let dictionaryEnabled = store.get("dictionaryEnabled", true);
   let helperMode = store.get("helperMode", "underline");
   let helperLeftWords = Number(store.get("helperLeftWords", 0));
   let helperRightWords = Number(store.get("helperRightWords", 0));
@@ -1498,6 +1499,96 @@
     return null;
   }
 
+  function appendDictionarySource(container, label, url) {
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = label;
+    container.appendChild(link);
+  }
+  function setDictionaryCopy(id, value) {
+    $(id).textContent = value || "No information was returned for this section.";
+  }
+  async function getReferenceDescription(word) {
+    const [dictResult, wikiResult] = await Promise.allSettled([
+      fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)).then(r => {
+        if (!r.ok) throw new Error("Dictionary entry not found");
+        return r.json();
+      }),
+      fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(word.replace(/ /g, "_"))).then(r => {
+        if (!r.ok) throw new Error("No Wikipedia summary");
+        return r.json();
+      })
+    ]);
+    const parts = [];
+    const sources = [];
+    if (dictResult.status === "fulfilled" && Array.isArray(dictResult.value)) {
+      const entry = dictResult.value[0];
+      if (entry.phonetic) parts.push("Pronunciation: " + entry.phonetic);
+      (entry.meanings || []).slice(0, 4).forEach(m => {
+        const defs = (m.definitions || []).slice(0, 2).map(d => d.definition).filter(Boolean);
+        if (defs.length) parts.push(m.partOfSpeech + ": " + defs.join(" / "));
+      });
+      if (entry.origin) parts.push("Recorded origin: " + entry.origin);
+      sources.push({ title: "Dictionary API", url: "https://dictionaryapi.dev/" });
+    }
+    let wikiTitle = "";
+    if (wikiResult.status === "fulfilled" && wikiResult.value && wikiResult.value.extract) {
+      const w = wikiResult.value;
+      wikiTitle = w.title || word;
+      parts.push("Reference overview: " + w.extract);
+      sources.push({ title: "Wikipedia — " + wikiTitle, url: w.content_urls?.desktop?.page || "https://en.wikipedia.org/wiki/" + encodeURIComponent(wikiTitle.replace(/ /g, "_")) });
+    }
+    sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
+    sources.push({ title: "MedlinePlus search", url: "https://medlineplus.gov/search/?q=" + encodeURIComponent(word) });
+    sources.push({ title: "PubMed search", url: "https://pubmed.ncbi.nlm.nih.gov/?term=" + encodeURIComponent(word) });
+    return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
+  }
+  async function lookupDictionary(rawWord) {
+    const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
+    if (!word || word.length > 100) return;
+    $("dictionary-dialog").hidden = false;
+    $("dictionary-word-input").value = word;
+    $("dictionary-status").textContent = "Loading dictionary references…";
+    setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
+    $("dictionary-sources").innerHTML = "";
+    const cacheKey = "wordLookup:" + word.toLocaleLowerCase();
+    const cached = store.get(cacheKey, null);
+    if (cached && Date.now() - cached.savedAt < 30 * 24 * 60 * 60 * 1000) {
+      setDictionaryCopy("dictionary-definition", cached.description);
+      (cached.sources || []).forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+      $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
+      return;
+    }
+    try {
+      const reference = await getReferenceDescription(word);
+      setDictionaryCopy("dictionary-definition", reference.description);
+      reference.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
+      $("dictionary-status").textContent = "Dictionary lookup complete.";
+      store.set(cacheKey, { description: reference.description, sources: reference.sources, savedAt: Date.now() });
+    } catch (error) {
+      setDictionaryCopy("dictionary-definition", "Reference websites could not be reached. Check your internet connection.");
+      $("dictionary-status").textContent = "Dictionary lookup unavailable.";
+    }
+  }
+  $("dictionary-word-search").addEventListener("click", () => {
+    const editedWord = $("dictionary-word-input").value.trim();
+    if (!editedWord) {
+      $("dictionary-word-input").focus();
+      return;
+    }
+    lookupDictionary(editedWord, editedWord);
+  });
+  $("dictionary-word-input").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("dictionary-word-search").click();
+    }
+  });
+  function closeDictionary() { $("dictionary-dialog").hidden = true; }
+  $("dictionary-dialog").addEventListener("click", e => { if (e.target === $("dictionary-dialog")) closeDictionary(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("dictionary-dialog").hidden) closeDictionary(); });
+
   function attachReadingHelper(doc) {
     if (!doc || helperDocs.has(doc)) return;
     helperDocs.add(doc);
@@ -1522,6 +1613,12 @@
         highlights.set(helperHighlightName, new HighlightClass(range));
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
+    doc.addEventListener("click", (e) => {
+      if (!helperEnabled || !dictionaryEnabled || !current || e.target.closest("a")) return;
+      const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
+      const word = caret && getHelperWordRange(doc, caret);
+      if (word) lookupDictionary(word.range.toString(), word.context);
+    });
     doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
   }
 
@@ -1564,6 +1661,27 @@
       CSS.highlights.set(helperHighlightName, new HighlightClass(range));
     } catch { clearHelperDoc(document); }
   }, { passive: true });
+
+  function updateDictionaryButton() {
+    const button = $("dictionary-toggle");
+    button.setAttribute("aria-pressed", dictionaryEnabled ? "true" : "false");
+    button.textContent = dictionaryEnabled ? "⌕ Lookup: On" : "⌕ Lookup: Off";
+    button.title = dictionaryEnabled ? "Turn word lookup off" : "Turn word lookup on";
+  }
+  function setDictionaryEnabled(on) {
+    dictionaryEnabled = !!on;
+    store.set("dictionaryEnabled", dictionaryEnabled);
+    updateDictionaryButton();
+    if (!dictionaryEnabled) closeDictionary();
+  }
+  $("dictionary-toggle").addEventListener("click", () => setDictionaryEnabled(!dictionaryEnabled));
+  updateDictionaryButton();
+  $("pdfview").addEventListener("click", (e) => {
+    if (!helperEnabled || !dictionaryEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
+    const caret = getCaretAtPoint(document, e.clientX, e.clientY);
+    const word = caret && getHelperWordRange(document, caret);
+    if (word) lookupDictionary(word.range.toString(), word.context);
+  });
 
   /* ---------- Panels ---------- */
   function hidePanels() { ["toc", "settings", "notes"].forEach((p) => ($(p).hidden = true)); }
