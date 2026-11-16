@@ -1613,7 +1613,7 @@
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
     doc.addEventListener("click", (e) => {
-      if (!helperEnabled || !dictionaryEnabled || !current || e.target.closest("a")) return;
+      if (!dictionaryEnabled || !current || e.target.closest("a")) return;
       const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
       const word = caret && getHelperWordRange(doc, caret);
       if (word) lookupDictionary(word.range.toString(), word.context);
@@ -1676,7 +1676,7 @@
   $("dictionary-toggle").addEventListener("click", () => setDictionaryEnabled(!dictionaryEnabled));
   updateDictionaryButton();
   $("pdfview").addEventListener("click", (e) => {
-    if (!helperEnabled || !dictionaryEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
+    if (!dictionaryEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
     const caret = getCaretAtPoint(document, e.clientX, e.clientY);
     const word = caret && getHelperWordRange(document, caret);
     if (word) lookupDictionary(word.range.toString(), word.context);
