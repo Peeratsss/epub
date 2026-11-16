@@ -1508,7 +1508,7 @@
   function showWordLookup(word, anchor) {
     const dialog = $("word-lookup");
     if (!dialog || !word) return;
-    const cleanWord = String(word).trim().replace(/^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}'’_-]+$/gu, "");
+    const cleanWord = String(word).trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}'’_-]+$/gu, "");
     if (!cleanWord || cleanWord.length > 100) return;
     const requestId = ++lookupRequest;
     $("word-lookup-title").textContent = cleanWord;
@@ -1530,7 +1530,7 @@
         const meanings = entry && Array.isArray(entry.meanings) ? entry.meanings : [];
         const definitions = meanings.flatMap(m => (m.definitions || []).slice(0, 2).map(d => (m.partOfSpeech ? m.partOfSpeech + ": " : "") + d.definition));
         $("word-lookup-pronunciation").textContent = phonetic || "";
-        $("word-lookup-definition").textContent = definitions.length ? definitions.slice(0, 6).join("\\n\\n") : "No definition was available.";
+        $("word-lookup-definition").textContent = definitions.length ? definitions.slice(0, 6).join("\n\n") : "No definition was available.";
       }).catch(() => {
         if (requestId === lookupRequest) $("word-lookup-definition").textContent = "No dictionary definition found for this word.";
       });
@@ -1578,7 +1578,8 @@
         highlights.set(helperHighlightName, new HighlightClass(range));
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
-    doc.addEventListener("click", (e) => lookupAtPoint(doc, e.clientX, e.clientY));\n    doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
+    doc.addEventListener("click", (e) => lookupAtPoint(doc, e.clientX, e.clientY));
+    doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
   }
 
   function refreshHelperStyles() {
@@ -1598,7 +1599,8 @@
     }
   }
   $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
-  $("pdfview").addEventListener("click", (e) => {\n    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) lookupAtPoint(document, e.clientX, e.clientY);\n  });\n  $("pdfview").addEventListener("mousemove", (e) => {
+  $("pdfview").addEventListener("click", (e) => {\n    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) lookupAtPoint(document, e.clientX, e.clientY);\n  });
+  $("pdfview").addEventListener("mousemove", (e) => {
     if (!helperEnabled || mode !== "pdf") return;
     const target = e.target;
     if (!target.closest || !target.closest(".textLayer")) {
