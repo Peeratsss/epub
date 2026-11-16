@@ -38,11 +38,6 @@
     set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   };
 
-  try {
-    Object.keys(localStorage).forEach((key) => {
-      if (key.startsWith("wordLookup:")) localStorage.removeItem(key);
-    });
-  } catch {}
 
   const FONTS = [
     { name: "Book default", css: "" },
@@ -1503,57 +1498,6 @@
     return null;
   }
 
-  /* ---------- Non-AI word lookup (DictionaryAPI.dev + Wikipedia) ---------- */
-  let lookupRequest = 0;
-  function showWordLookup(word, anchor) {
-    const dialog = $("word-lookup");
-    if (!dialog || !word) return;
-    const cleanWord = String(word).trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}'’_-]+$/gu, "");
-    if (!cleanWord || cleanWord.length > 100) return;
-    const requestId = ++lookupRequest;
-    $("word-lookup-title").textContent = cleanWord;
-    $("word-lookup-definition").textContent = "Looking up dictionary definition…";
-    $("word-lookup-pronunciation").textContent = "";
-    $("word-lookup-wiki").textContent = "Searching Wikipedia…";
-    $("word-lookup-wiki-link").hidden = true;
-    dialog.hidden = false;
-    const close = () => { dialog.hidden = true; };
-    $("word-lookup-close").onclick = close;
-    $("word-lookup-done").onclick = close;
-    const dictUrl = "https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(cleanWord);
-    const wikiUrl = "https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(cleanWord);
-    fetch(dictUrl).then(r => { if (!r.ok) throw new Error("No dictionary entry found."); return r.json(); })
-      .then(data => {
-        if (requestId !== lookupRequest) return;
-        const entry = Array.isArray(data) && data[0];
-        const phonetic = entry && (entry.phonetic || (entry.phonetics || []).find(x => x.text)?.text);
-        const meanings = entry && Array.isArray(entry.meanings) ? entry.meanings : [];
-        const definitions = meanings.flatMap(m => (m.definitions || []).slice(0, 2).map(d => (m.partOfSpeech ? m.partOfSpeech + ": " : "") + d.definition));
-        $("word-lookup-pronunciation").textContent = phonetic || "";
-        $("word-lookup-definition").textContent = definitions.length ? definitions.slice(0, 6).join("\n\n") : "No definition was available.";
-      }).catch(() => {
-        if (requestId === lookupRequest) $("word-lookup-definition").textContent = "No dictionary definition found for this word.";
-      });
-    fetch(wikiUrl).then(r => { if (!r.ok) throw new Error("No Wikipedia article found."); return r.json(); })
-      .then(data => {
-        if (requestId !== lookupRequest) return;
-        $("word-lookup-wiki").textContent = data.extract || "No Wikipedia summary available.";
-        if (data.content_urls && data.content_urls.desktop && data.content_urls.desktop.page) {
-          $("word-lookup-wiki-link").href = data.content_urls.desktop.page;
-          $("word-lookup-wiki-link").hidden = false;
-        }
-      }).catch(() => {
-        if (requestId === lookupRequest) $("word-lookup-wiki").textContent = "No related Wikipedia summary found.";
-      });
-  }
-  function lookupAtPoint(doc, x, y) {
-    if (!helperEnabled || !current) return;
-    const caret = getCaretAtPoint(doc, x, y);
-    if (!caret || caret.startContainer.nodeType !== doc.defaultView.Node.TEXT_NODE) return;
-    const word = getHelperWordRange(doc, caret);
-    if (word && word.word) showWordLookup(word.word);
-  }
-
   function attachReadingHelper(doc) {
     if (!doc || helperDocs.has(doc)) return;
     helperDocs.add(doc);
@@ -1578,7 +1522,6 @@
         highlights.set(helperHighlightName, new HighlightClass(range));
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
-    doc.addEventListener("click", (e) => lookupAtPoint(doc, e.clientX, e.clientY));
     doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
   }
 
@@ -1599,11 +1542,6 @@
     }
   }
   $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
-  $("pdfview").addEventListener("click", (e) => {
-    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) {
-      lookupAtPoint(document, e.clientX, e.clientY);
-    }
-  });
   $("pdfview").addEventListener("mousemove", (e) => {
     if (!helperEnabled || mode !== "pdf") return;
     const target = e.target;
