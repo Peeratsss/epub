@@ -135,13 +135,13 @@
               <option value="highlight">Highlight</option>
             </select>
           </label>
-          <label class="field">Word detection <span id="helper-word-offset-label">Main word</span>
-            <input id="helper-word-offset" type="range" min="-3" max="3" step="1" value="0" list="helper-word-offset-ticks">
-            <datalist id="helper-word-offset-ticks">
-              <option value="-3"></option><option value="-2"></option><option value="-1"></option>
-              <option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option>
-            </datalist>
-            <span class="helper-offset-labels"><span>-3</span><span>-2</span><span>-1</span><span>Main</span><span>+1</span><span>+2</span><span>+3</span></span>
+          <label class="field">Words to include on the left <span id="helper-left-words-label">0 words</span>
+            <input id="helper-left-words" type="range" min="0" max="3" step="1" value="0">
+            <span class="helper-range-labels"><span>Main only</span><span>+1</span><span>+2</span><span>+3</span></span>
+          </label>
+          <label class="field">Words to include on the right <span id="helper-right-words-label">0 words</span>
+            <input id="helper-right-words" type="range" min="0" max="3" step="1" value="0">
+            <span class="helper-range-labels"><span>Main only</span><span>+1</span><span>+2</span><span>+3</span></span>
           </label>
           <label class="field" id="helper-underline-field">Underline color
             <input id="helper-underline-color" type="color" value="#cd6ceb">
