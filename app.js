@@ -66,8 +66,10 @@
   let pdfZoom = store.get("pdfZoom", 1);
   let helperEnabled = store.get("helperEnabled", false);
   let helperMode = store.get("helperMode", "underline");
-  let helperWordOffset = Number(store.get("helperWordOffset", 0));
-  if (!Number.isInteger(helperWordOffset) || helperWordOffset < -3 || helperWordOffset > 3) helperWordOffset = 0;
+  let helperLeftWords = Number(store.get("helperLeftWords", 0));
+  let helperRightWords = Number(store.get("helperRightWords", 0));
+  if (!Number.isInteger(helperLeftWords) || helperLeftWords < 0 || helperLeftWords > 3) helperLeftWords = 0;
+  if (!Number.isInteger(helperRightWords) || helperRightWords < 0 || helperRightWords > 3) helperRightWords = 0;
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
@@ -486,17 +488,24 @@
     $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
     $("zoom-range").value = Math.round(pdfZoom * 100); $("zoom-label").textContent = Math.round(pdfZoom * 100) + "%";
     $("helper-mode").value = helperMode;
-    $("helper-word-offset").value = helperWordOffset;
-    updateHelperOffsetLabel();
+    $("helper-left-words").value = helperLeftWords;
+    $("helper-right-words").value = helperRightWords;
+    updateHelperRangeLabels();
     $("helper-underline-color").value = helperUnderlineColor;
     $("helper-bg-color").value = helperBgColor;
     $("helper-text-color").value = helperTextColor;
     updateHelperControls();
     updateHelperButton();
-    $("helper-word-offset").addEventListener("input", (e) => {
-      helperWordOffset = Number(e.target.value);
-      store.set("helperWordOffset", helperWordOffset);
-      updateHelperOffsetLabel();
+    $("helper-left-words").addEventListener("input", (e) => {
+      helperLeftWords = Number(e.target.value);
+      store.set("helperLeftWords", helperLeftWords);
+      updateHelperRangeLabels();
+      helperDocs.forEach(clearHelperDoc);
+    });
+    $("helper-right-words").addEventListener("input", (e) => {
+      helperRightWords = Number(e.target.value);
+      store.set("helperRightWords", helperRightWords);
+      updateHelperRangeLabels();
       helperDocs.forEach(clearHelperDoc);
     });
     $("helper-mode").addEventListener("change", (e) => {
@@ -1345,10 +1354,11 @@
     button.textContent = helperEnabled ? "◎ Helper: On" : "◎ Helper";
     button.title = helperEnabled ? "Turn Reading Helper off" : "Turn Reading Helper on";
   }
-  function updateHelperOffsetLabel() {
-    const label = $("helper-word-offset-label");
-    if (label) label.textContent = helperWordOffset === 0 ? "Main word" :
-      (helperWordOffset > 0 ? "+" : "") + helperWordOffset + " word" + (Math.abs(helperWordOffset) === 1 ? "" : "s");
+  function updateHelperRangeLabels() {
+    const left = $("helper-left-words-label");
+    const right = $("helper-right-words-label");
+    if (left) left.textContent = helperLeftWords + " word" + (helperLeftWords === 1 ? "" : "s");
+    if (right) right.textContent = helperRightWords + " word" + (helperRightWords === 1 ? "" : "s");
   }
 
   function updateHelperControls() {
@@ -1441,9 +1451,9 @@
     }
     if (pos < 0 || pos >= fullText.length || isSeparatorAt(pos)) return null;
 
-    // Build word boundaries using the same separator rules, then apply the
-    // selected context: previous + current + next, current only, previous only,
-    // or next only. Hyphenated line-break words remain a single token.
+    // Build word boundaries using the same separator rules. The word under
+    // the pointer is always included; the two independent controls expand the
+    // highlighted range by up to three words to its left and right.
     const tokens = [];
     let scan = 0;
     while (scan < fullText.length) {
@@ -1455,10 +1465,10 @@
     }
     const tokenIndex = tokens.findIndex((token) => pos >= token.start && pos < token.end);
     if (tokenIndex < 0) return null;
-    const targetIndex = tokenIndex + helperWordOffset;
-    if (targetIndex < 0 || targetIndex >= tokens.length) return null;
-    const start = tokens[targetIndex].start;
-    const end = tokens[targetIndex].end;
+    const firstIndex = Math.max(0, tokenIndex - helperLeftWords);
+    const lastIndex = Math.min(tokens.length - 1, tokenIndex + helperRightWords);
+    const start = tokens[firstIndex].start;
+    const end = tokens[lastIndex].end;
 
     const pointAt = (offset, preferNext) => {
       for (let i = 0; i < nodes.length; i++) {
