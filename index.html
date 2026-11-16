@@ -76,6 +76,7 @@
         <button id="toc-btn" class="btn" title="Table of contents">☰</button>
         <button id="settings-btn" class="btn" title="Text settings">Aa</button>
         <button id="helper-toggle" class="btn helper-toggle" type="button" title="Turn Reading Helper on or off" aria-pressed="false">◎ Helper</button>
+<button id="dictionary-toggle" class="btn dictionary-toggle" type="button" title="Turn word lookup on or off" aria-pressed="true">⌕ Lookup: On</button>
       </div>
     </header>
 
@@ -223,6 +224,27 @@
         </section>
       </div>
       <p class="stats-footnote">Reading time counts while this reader tab is visible. Pages are counted once per book.</p>
+    </section>
+  </div>
+
+  <div id="dictionary-dialog" class="dictionary-dialog" hidden role="dialog" aria-modal="true" aria-label="Word dictionary">
+    <section class="dictionary-card">
+      <header class="dictionary-heading">
+        <div class="dictionary-title-edit">
+          <div class="dictionary-eyebrow">WORD LOOKUP</div>
+          <input id="dictionary-word-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" aria-label="Edit word or phrase to look up" placeholder="Enter a word or phrase">
+        </div>
+        <button id="dictionary-word-search" class="btn primary" type="button">Look up</button>
+      </header>
+      <div id="dictionary-status" class="dictionary-status">Looking up…</div>
+      <section class="dictionary-section">
+        <h3>Dictionary &amp; reference description</h3>
+        <div id="dictionary-definition" class="dictionary-copy"></div>
+      </section>
+      <section class="dictionary-section">
+        <h3>Sources</h3>
+        <div id="dictionary-sources" class="dictionary-sources"></div>
+      </section>
     </section>
   </div>
 
