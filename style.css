@@ -276,3 +276,6 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
   .library-stats-bar-wrap{height:38px}
   .library-stats-day strong,.library-stats-day span{font-size:9px}
 }
+
+/* Reading Helper: independent left/right word-range sliders */
+.helper-range-labels{display:flex;justify-content:space-between;margin-top:3px;color:var(--muted);font-size:10px}
