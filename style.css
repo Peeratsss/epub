@@ -279,3 +279,6 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 
 /* Reading Helper: independent left/right word-range sliders */
 .helper-range-labels{display:flex;justify-content:space-between;margin-top:3px;color:var(--muted);font-size:10px}
+
+
+
