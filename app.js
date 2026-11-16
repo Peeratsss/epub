@@ -1616,7 +1616,7 @@
       if (!dictionaryEnabled || !current || e.target.closest("a")) return;
       const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
       const word = caret && getHelperWordRange(doc, caret);
-      if (word) lookupDictionary(word.range.toString(), word.context);
+      if (word) lookupDictionary(word.word, word.context);
     });
     doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
   }
