@@ -1525,28 +1525,33 @@
       "pathogen","neoplasm","carcinoma","metastasis","asphyxia","hypoxia","ischemia"
     ]);
     const lifeScienceTerms = new Set([
-      "cell","cells","tissue","tissues","organelle","organelles","cytoplasm","mitochondria",
-      "mitochondrion","ribosome","ribosomes","nucleus","nucleolus","chromosome","chromosomes",
-      "DNA","RNA","gene","genes","genome","genetics","meiosis","mitosis","osmosis",
-      "diffusion","photosynthesis","chloroplast","chlorophyll","prokaryote","eukaryote"
+      "organelle","organelles","cytoplasm","mitochondria","mitochondrion","ribosome","ribosomes",
+      "nucleus","nucleolus","chromosome","chromosomes","dna","rna","gene","genes","genome",
+      "genetics","meiosis","mitosis","osmosis","diffusion","photosynthesis","chloroplast",
+      "chlorophyll","prokaryote","eukaryote"
     ]);
     const programmingLanguages = new Set([
       "c#","c++","javascript","typescript","python","java","rust","golang","go",
       "php","ruby","swift","kotlin","html","css","sql","bash","powershell","lua","dart"
     ]);
     const medicalContext = /\b(medical|medicine|clinical|patient|diagnosis|diagnostic|disease|disorder|symptom|syndrome|treatment|therapy|pathology|anatomy|physiology|nursing|pharmacology|drug|medication|hospital|healthcare|infection|inflammation|organ|artery|vein|blood|cardiac|pulmonary|renal|hepatic|neurologic|clinical signs)\b/u;
-    const biologyContext = /\b(biology|biological|cellular|cells?|tissues?|organelle|cytoplasm|mitochondri|ribosom|chromosom|DNA|RNA|gene|genetic|organism|photosynthesis|ecosystem|microscope|histology|embryology)\b/u;
+    const biologyContext = /\b(biology|biological|cellular|cell membrane|cell wall|cell division|basic unit of life|living organism|tissues?|organelle|cytoplasm|mitochondri|ribosom|chromosom|dna|rna|gene|genetic|organism|photosynthesis|ecosystem|microscope|histology|embryology)\b/u;
     const programmingContext = /\b(programming|programmer|software|source code|code|coding|compiler|interpreter|syntax|variable|function|method|class|object|algorithm|debugging|repository|framework|library|runtime|database|developer|IDE|API|script)\b/u;
     const computingContext = /\b(computer|computing|hardware|operating system|windows|linux|processor|CPU|GPU|RAM|memory address|network|networking|protocol|server|cloud|browser|web development|cybersecurity|encryption|command line|terminal|device driver|firmware)\b/u;
 
-    // Unambiguous terms take priority; surrounding book text helps with broad terms.
+    // C# and C++ are distinctive enough to classify from the word alone.
+    if (word === "c#" || word === "c++" ||
+        /^(javascript|typescript|html|css)$/u.test(word)) {
+      return { key: "programming", label: "Programming / software" };
+    }
+    // Medical terms and the surrounding book text distinguish clinical use from general language.
     if (medicalTerms.has(word) || medicalContext.test(context)) {
       return { key: "medical", label: "Medical / clinical" };
     }
     if (lifeScienceTerms.has(word) || biologyContext.test(context)) {
       return { key: "life-science", label: "Biology / life sciences" };
     }
-    if (word === "c#" || word === "c++" || programmingLanguages.has(word) ||
+    if ((programmingLanguages.has(word) && programmingContext.test(context)) ||
         programmingContext.test(context)) {
       return { key: "programming", label: "Programming / software" };
     }
