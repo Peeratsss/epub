@@ -38,6 +38,12 @@
     set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   };
 
+  try {
+    Object.keys(localStorage).forEach((key) => {
+      if (key.startsWith("wordLookup:")) localStorage.removeItem(key);
+    });
+  } catch {}
+
   const FONTS = [
     { name: "Book default", css: "" },
     { name: "Georgia", css: "Georgia, serif" },
@@ -59,8 +65,9 @@
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
   let pdfZoom = store.get("pdfZoom", 1);
   let helperEnabled = store.get("helperEnabled", false);
-  let dictionaryEnabled = store.get("dictionaryEnabled", true);
   let helperMode = store.get("helperMode", "underline");
+  let helperWordOffset = Number(store.get("helperWordOffset", 0));
+  if (!Number.isInteger(helperWordOffset) || helperWordOffset < -3 || helperWordOffset > 3) helperWordOffset = 0;
   let helperUnderlineColor = store.get("helperUnderlineColor", "#cd6ceb");
   let helperBgColor = store.get("helperBgColor", "#fff09a");
   let helperTextColor = store.get("helperTextColor", "#292238");
@@ -253,31 +260,56 @@
     saveReadingStats();
   }
 
+  const STATS_IDLE_TIMEOUT = 2 * 60 * 1000;
+
+  function markStatsActivity() {
+    if (!statsSession || !current || statsSession.bookId !== current.id || document.hidden) return;
+    const now = Date.now();
+    // First account for the time before this interaction, using the previous
+    // activity timestamp. Then restart the active window at this interaction.
+    flushStatsTime(false);
+    statsSession.lastActivity = now;
+    statsSession.lastTick = now;
+    statsSession.active = true;
+  }
+
+  function attachStatsActivity(target) {
+    if (!target || target.__readerStatsActivityAttached) return;
+    try { target.__readerStatsActivityAttached = true; } catch {}
+    const onActivity = () => markStatsActivity();
+    ["pointerdown", "pointermove", "keydown", "wheel", "touchstart", "scroll"].forEach((eventName) => {
+      target.addEventListener(eventName, onActivity, { passive: true, capture: true });
+    });
+  }
+
   function flushStatsTime(force) {
     if (!statsSession || !statsSession.active || !current || statsSession.bookId !== current.id) return;
     const now = Date.now();
-    if (!force && document.hidden) { statsSession.lastTick = now; return; }
-    const elapsed = Math.max(0, Math.min((now - statsSession.lastTick) / 1000, 30));
+    const idleDeadline = statsSession.lastActivity + STATS_IDLE_TIMEOUT;
+    const countUntil = Math.min(now, idleDeadline);
+    const elapsed = Math.max(0, (countUntil - statsSession.lastTick) / 1000);
     if (elapsed >= 1) {
       const entry = statsBook(current);
       entry.totalSeconds = (Number(entry.totalSeconds) || 0) + elapsed;
       const daily = statsDaily(entry);
       daily.seconds = (Number(daily.seconds) || 0) + elapsed;
-      entry.lastRead = now;
+      entry.lastRead = countUntil;
       saveReadingStats();
     }
     statsSession.lastTick = now;
+    if (now >= idleDeadline) statsSession.active = false;
   }
 
   function startStatsSession() {
     stopStatsSession();
     if (!current || !mode) return;
-    statsSession = { bookId: current.id, lastTick: Date.now(), active: !document.hidden };
+    const now = Date.now();
+    statsSession = { bookId: current.id, lastTick: now, lastActivity: now, active: !document.hidden };
     const entry = statsBook(current);
-    entry.lastRead = Date.now();
+    entry.lastRead = now;
     saveReadingStats();
     recordStatsPage(statsPageKey());
-    statsTimer = setInterval(() => flushStatsTime(false), 15000);
+    statsTimer = setInterval(() => flushStatsTime(false), 5000);
   }
 
   function stopStatsSession() {
@@ -293,14 +325,19 @@
       flushStatsTime(true);
       statsSession.active = false;
     } else {
+      const now = Date.now();
       statsSession.active = true;
-      statsSession.lastTick = Date.now();
+      statsSession.lastTick = now;
+      statsSession.lastActivity = now;
     }
   });
   window.addEventListener("pagehide", () => {
     flushStatsTime(true);
     if (statsSession) statsSession.active = false;
   });
+
+  // Activity from the main page (PDF pages, controls, scrolling) resets AFK time.
+  attachStatsActivity(document);
 
   function formatReadingDuration(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -449,11 +486,19 @@
     $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
     $("zoom-range").value = Math.round(pdfZoom * 100); $("zoom-label").textContent = Math.round(pdfZoom * 100) + "%";
     $("helper-mode").value = helperMode;
+    $("helper-word-offset").value = helperWordOffset;
+    updateHelperOffsetLabel();
     $("helper-underline-color").value = helperUnderlineColor;
     $("helper-bg-color").value = helperBgColor;
     $("helper-text-color").value = helperTextColor;
     updateHelperControls();
     updateHelperButton();
+    $("helper-word-offset").addEventListener("input", (e) => {
+      helperWordOffset = Number(e.target.value);
+      store.set("helperWordOffset", helperWordOffset);
+      updateHelperOffsetLabel();
+      helperDocs.forEach(clearHelperDoc);
+    });
     $("helper-mode").addEventListener("change", (e) => {
       helperMode = e.target.value; store.set("helperMode", helperMode);
       updateHelperControls(); refreshHelperStyles();
@@ -659,6 +704,7 @@
     rendition.hooks.content.register((contents) => {
       styleDoc(contents.document);
       attachReadingHelper(contents.document);
+      attachStatsActivity(contents.document);
     });
     applyTheme();
 
@@ -742,7 +788,6 @@
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
     if (typeof helperDocs !== "undefined") { helperDocs.forEach(clearHelperDoc); helperDocs.clear(); }
     pendingSel = null;
-    closeDictionary();
     $("viewer").innerHTML = "";
     $("pdfpage").innerHTML = "";
     $("toc").innerHTML = "";
@@ -782,26 +827,97 @@
     return hit ? hit.label.trim() : "";
   }
 
-  function buildTOC(items) {
+  function renderTOCPanel(items, config) {
     const toc = $("toc");
     toc.innerHTML = "";
-    const add = (list, depth) => {
-      for (const it of list) {
-        const a = document.createElement("a");
-        a.href = "#";
-        a.textContent = it.label.trim();
-        a.style.paddingLeft = 16 + depth * 14 + "px";
-        a.addEventListener("click", (e) => {
-          e.preventDefault();
-          rendition.display(it.href);
-          toc.hidden = true;
+
+    const searchWrap = document.createElement("div");
+    searchWrap.className = "toc-search-wrap";
+    const search = document.createElement("input");
+    search.id = "toc-search-input";
+    search.type = "search";
+    search.placeholder = "Search chapters…";
+    search.autocomplete = "off";
+    search.setAttribute("aria-label", "Search table of contents");
+    searchWrap.appendChild(search);
+
+    const list = document.createElement("div");
+    list.id = "toc-list";
+    list.className = "toc-list";
+
+    const empty = document.createElement("div");
+    empty.className = "toc-search-empty";
+    empty.setAttribute("role", "status");
+    empty.setAttribute("aria-live", "polite");
+
+    const hasItems = Array.isArray(items) && items.length > 0;
+    if (!hasItems) {
+      search.disabled = true;
+      empty.textContent = config.emptyLabel || "This book has no table of contents.";
+    } else {
+      const add = (nodes, depth, parent) => {
+        (nodes || []).forEach((item) => {
+          const label = String(config.label(item) || "").trim() || "(untitled)";
+          const entry = document.createElement("div");
+          entry.className = "toc-entry";
+          entry.dataset.searchText = label.toLocaleLowerCase();
+
+          const link = document.createElement("a");
+          link.href = "#";
+          link.textContent = label;
+          link.style.paddingLeft = 16 + depth * 14 + "px";
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            config.onSelect(item);
+          });
+          entry.appendChild(link);
+
+          const descendants = config.children(item) || [];
+          if (descendants.length) {
+            const childGroup = document.createElement("div");
+            childGroup.className = "toc-children";
+            add(descendants, depth + 1, childGroup);
+            entry.appendChild(childGroup);
+          }
+          parent.appendChild(entry);
         });
-        toc.appendChild(a);
-        if (it.subitems && it.subitems.length) add(it.subitems, depth + 1);
-      }
-    };
-    add(items, 0);
+      };
+      add(items, 0, list);
+      search.addEventListener("input", () => {
+        const query = search.value.trim().toLocaleLowerCase();
+        const filterEntries = (container) => {
+          let anyVisible = false;
+          Array.from(container.children).forEach((entry) => {
+            const childGroup = entry.querySelector(":scope > .toc-children");
+            const childVisible = childGroup ? filterEntries(childGroup) : false;
+            const ownMatch = !query || entry.dataset.searchText.includes(query);
+            entry.hidden = !(ownMatch || childVisible);
+            if (!entry.hidden) anyVisible = true;
+          });
+          return anyVisible;
+        };
+        const found = filterEntries(list);
+        empty.textContent = query && !found ? "No chapters match your search." : "";
+        empty.hidden = !query || found;
+      });
+    }
+
+    empty.hidden = hasItems;
+    toc.append(searchWrap, list, empty);
   }
+
+  function buildTOC(items) {
+    renderTOCPanel(items, {
+      label: (item) => item.label,
+      children: (item) => item.subitems,
+      emptyLabel: "This book has no table of contents.",
+      onSelect: (item) => {
+        if (rendition) rendition.display(item.href);
+        $("toc").hidden = true;
+      },
+    });
+  }
+
 
   /* ---------- PDF ---------- */
   async function openPdf(meta, rec) {
@@ -1109,38 +1225,39 @@
   }
 
   async function buildPdfTOC(doc, items) {
-    const toc = $("toc");
     if (pdf !== doc) return;
-    if (!items || !items.length) { toc.innerHTML = '<div class="empty">This PDF has no table of contents.</div>'; return; }
-    toc.innerHTML = "";
-    const flat = [];
-    (function walk(list, d) { list.forEach((it) => { flat.push({ it, d }); if (it.items && it.items.length) walk(it.items, d + 1); }); })(items, 0);
-    flat.forEach(({ it, d }) => {
-      const a = document.createElement("a");
-      a.href = "#";
-      a.textContent = (it.title || "").trim() || "(untitled)";
-      a.style.paddingLeft = 16 + d * 14 + "px";
-      a.addEventListener("click", async (e) => {
-        e.preventDefault();
+    renderTOCPanel(items || [], {
+      label: (item) => item.title,
+      children: (item) => item.items,
+      emptyLabel: "This PDF has no table of contents.",
+      onSelect: async (item) => {
         try {
-          const p = it._page ?? (await resolvePdfDest(doc, it.dest));
-          if (p) { pdfGo(p); toc.hidden = true; }
-        } catch (err) { console.warn(err); }
-      });
-      toc.appendChild(a);
+          const page = item._page ?? (await resolvePdfDest(doc, item.dest));
+          if (page && pdf === doc) { pdfGo(page); $("toc").hidden = true; }
+        } catch (error) { console.warn(error); }
+      },
     });
-    // resolve target pages in the background so bookmarks/notes can show chapter names
-    const list = [];
-    for (const { it } of flat) {
+
+    // Resolve target pages so bookmarks and notes can show their chapter names.
+    const flat = [];
+    (function walk(list) {
+      (list || []).forEach((item) => {
+        flat.push(item);
+        if (item.items && item.items.length) walk(item.items);
+      });
+    })(items || []);
+    const chapters = [];
+    for (const item of flat) {
       if (pdf !== doc) return;
-      try { it._page = await resolvePdfDest(doc, it.dest); } catch {}
-      if (it._page) list.push({ label: (it.title || "").trim(), page: it._page });
+      try { item._page = await resolvePdfDest(doc, item.dest); } catch {}
+      if (item._page) chapters.push({ label: (item.title || "").trim(), page: item._page });
     }
     if (pdf !== doc) return;
-    list.sort((a, b) => a.page - b.page);
-    tocFlat = list;
+    chapters.sort((a, b) => a.page - b.page);
+    tocFlat = chapters;
     renderNotes();
   }
+
 
   function pdfChapterOf(page) {
     let label = "";
@@ -1228,6 +1345,12 @@
     button.textContent = helperEnabled ? "◎ Helper: On" : "◎ Helper";
     button.title = helperEnabled ? "Turn Reading Helper off" : "Turn Reading Helper on";
   }
+  function updateHelperOffsetLabel() {
+    const label = $("helper-word-offset-label");
+    if (label) label.textContent = helperWordOffset === 0 ? "Main word" :
+      (helperWordOffset > 0 ? "+" : "") + helperWordOffset + " word" + (Math.abs(helperWordOffset) === 1 ? "" : "s");
+  }
+
   function updateHelperControls() {
     const isHighlight = helperMode === "highlight";
     $("helper-underline-field").hidden = isHighlight;
@@ -1285,18 +1408,57 @@
     if (caretOffset < 0 || !nodes.length) return null;
 
     const fullText = nodes.map(x => x.value).join("");
-    const isSeparator = (ch) => !ch || /[\s,.]/u.test(ch);
+    const isWhitespace = (ch) => !!ch && /\s/u.test(ch);
+
+    // A hyphen at the end of a printed line joins the next line's letters
+    // into the same word (for example, "meso-\nderm"). Ordinary line
+    // breaks and spaces still separate words ("beginning\nof").
+    function isHyphenatedLineBreakSpace(index) {
+      if (!isWhitespace(fullText.charAt(index))) return false;
+      let runStart = index, runEnd = index + 1;
+      while (runStart > 0 && isWhitespace(fullText.charAt(runStart - 1))) runStart--;
+      while (runEnd < fullText.length && isWhitespace(fullText.charAt(runEnd))) runEnd++;
+      const lineBreak = /[\r\n\u2028\u2029]/u.test(fullText.slice(runStart, runEnd));
+      const before = fullText.charAt(runStart - 1);
+      const after = fullText.charAt(runEnd);
+      return lineBreak &&
+        /[-\u2010\u2011\u00ad]/u.test(before) &&
+        !!after && !/[\s,.]/u.test(after);
+    }
+
+    const isSeparatorAt = (index) => {
+      const ch = fullText.charAt(index);
+      if (!ch) return true;
+      if (ch === "," || ch === ".") return true;
+      return isWhitespace(ch) && !isHyphenatedLineBreakSpace(index);
+    };
+
     let pos = caretOffset;
-    if (isSeparator(fullText.charAt(pos))) {
-      if (!isSeparator(fullText.charAt(pos - 1))) pos--;
-      else if (!isSeparator(fullText.charAt(pos + 1))) pos++;
+    if (isSeparatorAt(pos)) {
+      if (!isSeparatorAt(pos - 1)) pos--;
+      else if (!isSeparatorAt(pos + 1)) pos++;
       else return null;
     }
-    if (pos < 0 || pos >= fullText.length || isSeparator(fullText.charAt(pos))) return null;
+    if (pos < 0 || pos >= fullText.length || isSeparatorAt(pos)) return null;
 
-    let start = pos, end = pos + 1;
-    while (start > 0 && !isSeparator(fullText.charAt(start - 1))) start--;
-    while (end < fullText.length && !isSeparator(fullText.charAt(end))) end++;
+    // Build word boundaries using the same separator rules, then apply the
+    // selected context: previous + current + next, current only, previous only,
+    // or next only. Hyphenated line-break words remain a single token.
+    const tokens = [];
+    let scan = 0;
+    while (scan < fullText.length) {
+      while (scan < fullText.length && isSeparatorAt(scan)) scan++;
+      if (scan >= fullText.length) break;
+      const tokenStart = scan;
+      while (scan < fullText.length && !isSeparatorAt(scan)) scan++;
+      tokens.push({ start: tokenStart, end: scan });
+    }
+    const tokenIndex = tokens.findIndex((token) => pos >= token.start && pos < token.end);
+    if (tokenIndex < 0) return null;
+    const targetIndex = tokenIndex + helperWordOffset;
+    if (targetIndex < 0 || targetIndex >= tokens.length) return null;
+    const start = tokens[targetIndex].start;
+    const end = tokens[targetIndex].end;
 
     const pointAt = (offset, preferNext) => {
       for (let i = 0; i < nodes.length; i++) {
@@ -1354,103 +1516,8 @@
         highlights.set(helperHighlightName, new HighlightClass(range));
       } catch { clearHelperDoc(doc); }
     }, { passive: true });
-    doc.addEventListener("click", (e) => {
-      if (!helperEnabled || !dictionaryEnabled || !current || e.target.closest("a")) return;
-      const caret = getCaretAtPoint(doc, e.clientX, e.clientY);
-      const word = caret && getHelperWordRange(doc, caret);
-      if (word) lookupDictionary(word.range.toString(), word.context);
-    });
     doc.addEventListener("mouseleave", () => clearHelperDoc(doc));
   }
-  function appendDictionarySource(container, label, url) {
-    if (!url) return;
-    const link = document.createElement("a");
-    link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
-    link.textContent = label;
-    container.appendChild(link);
-  }
-  function setDictionaryCopy(id, value) {
-    $(id).textContent = value || "No information was returned for this section.";
-  }
-  async function getReferenceDescription(word) {
-    const [dictResult, wikiResult] = await Promise.allSettled([
-      fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)).then(r => {
-        if (!r.ok) throw new Error("Dictionary entry not found");
-        return r.json();
-      }),
-      fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(word.replace(/ /g, "_"))).then(r => {
-        if (!r.ok) throw new Error("No Wikipedia summary");
-        return r.json();
-      })
-    ]);
-    const parts = [];
-    const sources = [];
-    if (dictResult.status === "fulfilled" && Array.isArray(dictResult.value)) {
-      const entry = dictResult.value[0];
-      if (entry.phonetic) parts.push("Pronunciation: " + entry.phonetic);
-      (entry.meanings || []).slice(0, 4).forEach(m => {
-        const defs = (m.definitions || []).slice(0, 2).map(d => d.definition).filter(Boolean);
-        if (defs.length) parts.push(m.partOfSpeech + ": " + defs.join(" / "));
-      });
-      if (entry.origin) parts.push("Recorded origin: " + entry.origin);
-      sources.push({ title: "Dictionary API", url: "https://dictionaryapi.dev/" });
-    }
-    let wikiTitle = "";
-    if (wikiResult.status === "fulfilled" && wikiResult.value && wikiResult.value.extract) {
-      const w = wikiResult.value;
-      wikiTitle = w.title || word;
-      parts.push("Reference overview: " + w.extract);
-      sources.push({ title: "Wikipedia — " + wikiTitle, url: w.content_urls?.desktop?.page || "https://en.wikipedia.org/wiki/" + encodeURIComponent(wikiTitle.replace(/ /g, "_")) });
-    }
-    sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
-    sources.push({ title: "MedlinePlus search", url: "https://medlineplus.gov/search/?q=" + encodeURIComponent(word) });
-    sources.push({ title: "PubMed search", url: "https://pubmed.ncbi.nlm.nih.gov/?term=" + encodeURIComponent(word) });
-    return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
-  }
-  async function lookupDictionary(rawWord) {
-    const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
-    if (!word || word.length > 100) return;
-    $("dictionary-dialog").hidden = false;
-    $("dictionary-word-input").value = word;
-    $("dictionary-status").textContent = "Loading dictionary references…";
-    setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
-    $("dictionary-sources").innerHTML = "";
-    const cacheKey = "wordLookup:" + word.toLocaleLowerCase();
-    const cached = store.get(cacheKey, null);
-    if (cached && Date.now() - cached.savedAt < 30 * 24 * 60 * 60 * 1000) {
-      setDictionaryCopy("dictionary-definition", cached.description);
-      (cached.sources || []).forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
-      $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
-      return;
-    }
-    try {
-      const reference = await getReferenceDescription(word);
-      setDictionaryCopy("dictionary-definition", reference.description);
-      reference.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
-      $("dictionary-status").textContent = "Dictionary lookup complete.";
-      store.set(cacheKey, { description: reference.description, sources: reference.sources, savedAt: Date.now() });
-    } catch (error) {
-      setDictionaryCopy("dictionary-definition", "Reference websites could not be reached. Check your internet connection.");
-      $("dictionary-status").textContent = "Dictionary lookup unavailable.";
-    }
-  }
-  $("dictionary-word-search").addEventListener("click", () => {
-    const editedWord = $("dictionary-word-input").value.trim();
-    if (!editedWord) {
-      $("dictionary-word-input").focus();
-      return;
-    }
-    lookupDictionary(editedWord, editedWord);
-  });
-  $("dictionary-word-input").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      $("dictionary-word-search").click();
-    }
-  });
-  function closeDictionary() { $("dictionary-dialog").hidden = true; }
-  $("dictionary-dialog").addEventListener("click", e => { if (e.target === $("dictionary-dialog")) closeDictionary(); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("dictionary-dialog").hidden) closeDictionary(); });
 
   function refreshHelperStyles() {
     helperDocs.forEach((doc) => {
@@ -1469,20 +1536,6 @@
     }
   }
   $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
-  function updateDictionaryButton() {
-    const button = $("dictionary-toggle");
-    button.setAttribute("aria-pressed", dictionaryEnabled ? "true" : "false");
-    button.textContent = dictionaryEnabled ? "⌕ Lookup: On" : "⌕ Lookup: Off";
-    button.title = dictionaryEnabled ? "Turn word lookup off" : "Turn word lookup on";
-  }
-  function setDictionaryEnabled(on) {
-    dictionaryEnabled = !!on;
-    store.set("dictionaryEnabled", dictionaryEnabled);
-    updateDictionaryButton();
-    if (!dictionaryEnabled) closeDictionary();
-  }
-  $("dictionary-toggle").addEventListener("click", () => setDictionaryEnabled(!dictionaryEnabled));
-  updateDictionaryButton();
   $("pdfview").addEventListener("mousemove", (e) => {
     if (!helperEnabled || mode !== "pdf") return;
     const target = e.target;
@@ -1505,12 +1558,6 @@
       CSS.highlights.set(helperHighlightName, new HighlightClass(range));
     } catch { clearHelperDoc(document); }
   }, { passive: true });
-  $("pdfview").addEventListener("click", (e) => {
-    if (!helperEnabled || !dictionaryEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
-    const caret = getCaretAtPoint(document, e.clientX, e.clientY);
-    const word = caret && getHelperWordRange(document, caret);
-    if (word) lookupDictionary(word.range.toString(), word.context);
-  });
 
   /* ---------- Panels ---------- */
   function hidePanels() { ["toc", "settings", "notes"].forEach((p) => ($(p).hidden = true)); }
@@ -1882,7 +1929,7 @@
   });
 
   if (typeof pdfjsLib !== "undefined") {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = window.__pdfWorkerSrc || "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = window.__pdfWorkerSrc || "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
   }
 
   initSettingsUI();

@@ -76,7 +76,6 @@
         <button id="toc-btn" class="btn" title="Table of contents">☰</button>
         <button id="settings-btn" class="btn" title="Text settings">Aa</button>
         <button id="helper-toggle" class="btn helper-toggle" type="button" title="Turn Reading Helper on or off" aria-pressed="false">◎ Helper</button>
-        <button id="dictionary-toggle" class="btn dictionary-toggle" type="button" title="Turn word lookup off" aria-pressed="true">⌕ Lookup: On</button>
       </div>
     </header>
 
@@ -136,6 +135,14 @@
               <option value="highlight">Highlight</option>
             </select>
           </label>
+          <label class="field">Word detection <span id="helper-word-offset-label">Main word</span>
+            <input id="helper-word-offset" type="range" min="-3" max="3" step="1" value="0" list="helper-word-offset-ticks">
+            <datalist id="helper-word-offset-ticks">
+              <option value="-3"></option><option value="-2"></option><option value="-1"></option>
+              <option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option>
+            </datalist>
+            <span class="helper-offset-labels"><span>-3</span><span>-2</span><span>-1</span><span>Main</span><span>+1</span><span>+2</span><span>+3</span></span>
+          </label>
           <label class="field" id="helper-underline-field">Underline color
             <input id="helper-underline-color" type="color" value="#cd6ceb">
           </label>
@@ -192,26 +199,6 @@
     </div>
   </div>
 
-  <div id="dictionary-dialog" class="dictionary-dialog" hidden role="dialog" aria-modal="true" aria-label="Word dictionary">
-    <section class="dictionary-card">
-      <header class="dictionary-heading">
-        <div class="dictionary-title-edit">
-          <div class="dictionary-eyebrow">WORD LOOKUP</div>
-          <input id="dictionary-word-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" aria-label="Edit word or phrase to look up" placeholder="Enter a word or phrase">
-        </div>
-        <button id="dictionary-word-search" class="btn primary" type="button">Look up</button>
-      </header>
-      <div id="dictionary-status" class="dictionary-status">Looking up…</div>
-      <section class="dictionary-section">
-        <h3>Dictionary &amp; reference description</h3>
-        <div id="dictionary-definition" class="dictionary-copy"></div>
-      </section>
-      <section class="dictionary-section">
-        <h3>Sources</h3>
-        <div id="dictionary-sources" class="dictionary-sources"></div>
-      </section>
-    </section>
-  </div>
 
   <div id="stats-dialog" class="stats-dialog" hidden role="dialog" aria-modal="true" aria-label="Reading statistics">
     <section class="stats-card">
@@ -258,7 +245,6 @@
         {
           name: "JSZip",
           urls: [
-            "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
             "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",
             "https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"
           ]
@@ -266,7 +252,6 @@
         {
           name: "EPUB.js",
           urls: [
-            "https://cdnjs.cloudflare.com/ajax/libs/epub.js/0.3.93/epub.min.js",
             "https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js",
             "https://unpkg.com/epubjs@0.3.93/dist/epub.min.js"
           ]
@@ -274,7 +259,6 @@
         {
           name: "PDF.js",
           urls: [
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
             "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
             "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"
           ]
@@ -285,11 +269,9 @@
         try {
           const loadedUrl = await loadFirst(lib.urls);
           if (lib.name === "PDF.js") {
-            window.__pdfWorkerSrc = loadedUrl.includes("cdnjs.cloudflare.com")
-              ? "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"
-              : loadedUrl.includes("jsdelivr.net")
-                ? "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
-                : "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+            window.__pdfWorkerSrc = loadedUrl.includes("jsdelivr.net")
+              ? "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
+              : "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
           }
           console.info(lib.name + " loaded from " + loadedUrl);
         } catch (error) {
