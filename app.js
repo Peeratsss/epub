@@ -1529,7 +1529,6 @@
         const defs = (m.definitions || []).slice(0, 2).map(d => d.definition).filter(Boolean);
         if (defs.length) parts.push(m.partOfSpeech + ": " + defs.join(" / "));
       });
-      if (entry.origin) parts.push("Recorded origin: " + entry.origin);
       sources.push({ title: "Dictionary API", url: "https://dictionaryapi.dev/" });
     }
     let wikiTitle = "";
