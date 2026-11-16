@@ -1679,7 +1679,7 @@
     if (!dictionaryEnabled || mode !== "pdf" || !e.target.closest(".textLayer")) return;
     const caret = getCaretAtPoint(document, e.clientX, e.clientY);
     const word = caret && getHelperWordRange(document, caret);
-    if (word) lookupDictionary(word.range.toString(), word.context);
+    if (word) lookupDictionary(word.word, word.context);
   });
 
   /* ---------- Panels ---------- */
