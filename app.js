@@ -1599,7 +1599,8 @@
     }
   }
   $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
-  $("pdfview").addEventListener("click", (e) => {\n    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) lookupAtPoint(document, e.clientX, e.clientY);\n  });
+  $("pdfview").addEventListener("click", (e) => {
+    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) lookupAtPoint(document, e.clientX, e.clientY);\n  });
   $("pdfview").addEventListener("mousemove", (e) => {
     if (!helperEnabled || mode !== "pdf") return;
     const target = e.target;
