@@ -869,7 +869,19 @@
 
           const link = document.createElement("a");
           link.href = "#";
-          link.textContent = label;
+          const title = document.createElement("span");
+          title.className = "toc-entry-title";
+          title.textContent = label;
+          link.appendChild(title);
+          if (config.pageLabel) {
+            const pageLabel = config.pageLabel(item);
+            if (pageLabel) {
+              const page = document.createElement("span");
+              page.className = "toc-page-number";
+              page.textContent = pageLabel;
+              link.appendChild(page);
+            }
+          }
           link.style.paddingLeft = 16 + depth * 14 + "px";
           link.addEventListener("click", (event) => {
             event.preventDefault();
@@ -915,6 +927,14 @@
     renderTOCPanel(items, {
       label: (item) => item.label,
       children: (item) => item.subitems,
+      pageLabel: (item) => {
+        try {
+          const spineItem = book && book.spine.get(item.href);
+          if (!spineItem || !spineItem.cfiBase || !book.locations.length()) return "";
+          const location = book.locations.locationFromCfi(spineItem.cfiBase);
+          return Number.isFinite(location) && location >= 0 ? "p. " + (location + 1) : "";
+        } catch { return ""; }
+      },
       emptyLabel: "This book has no table of contents.",
       onSelect: (item) => {
         if (rendition) rendition.display(item.href);
@@ -1234,6 +1254,7 @@
     renderTOCPanel(items || [], {
       label: (item) => item.title,
       children: (item) => item.items,
+      pageLabel: (item) => item._page ? "p. " + item._page : "",
       emptyLabel: "This PDF has no table of contents.",
       onSelect: async (item) => {
         try {
