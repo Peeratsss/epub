@@ -1509,20 +1509,136 @@
   function setDictionaryCopy(id, value) {
     $(id).textContent = value || "No information was returned for this section.";
   }
-  async function getReferenceDescription(word) {
-    const [dictResult, wikiResult] = await Promise.allSettled([
-      fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)).then(r => {
-        if (!r.ok) throw new Error("Dictionary entry not found");
-        return r.json();
-      }),
+  function classifyLookupTopic(rawWord, rawContext = "") {
+    const word = String(rawWord || "").toLocaleLowerCase().trim().replace(/\s+/g, " ");
+    const context = String(rawContext || "").toLocaleLowerCase();
+
+    const medicalTerms = new Set([
+      "ischemia","ischaemia","ischemic","ischaemic","infarction","infarct","necrosis",
+      "thrombosis","embolism","embolus","atherosclerosis","hypertension","hypotension",
+      "tachycardia","bradycardia","arrhythmia","dyspnea","dyspnoea","cyanosis",
+      "edema","oedema","hemorrhage","haemorrhage","anemia","anaemia","leukemia",
+      "leukaemia","sepsis","pathology","etiology","aetiology","prognosis","diagnosis",
+      "prophylaxis","pharmacology","anatomy","physiology","histology","hemostasis",
+      "haemostasis","homeostasis","myocardial","pulmonary","renal","hepatic","cerebral",
+      "neurological","neurologic","immunology","endocrine","antigen","antibody",
+      "pathogen","neoplasm","carcinoma","metastasis","asphyxia","hypoxia","ischemia"
+    ]);
+    const lifeScienceTerms = new Set([
+      "cell","cells","tissue","tissues","organelle","organelles","cytoplasm","mitochondria",
+      "mitochondrion","ribosome","ribosomes","nucleus","nucleolus","chromosome","chromosomes",
+      "DNA","RNA","gene","genes","genome","genetics","meiosis","mitosis","osmosis",
+      "diffusion","photosynthesis","chloroplast","chlorophyll","prokaryote","eukaryote"
+    ]);
+    const programmingLanguages = new Set([
+      "c#","c++","javascript","typescript","python","java","rust","golang","go",
+      "php","ruby","swift","kotlin","html","css","sql","bash","powershell","lua","dart"
+    ]);
+    const medicalContext = /\b(medical|medicine|clinical|patient|diagnosis|diagnostic|disease|disorder|symptom|syndrome|treatment|therapy|pathology|anatomy|physiology|nursing|pharmacology|drug|medication|hospital|healthcare|infection|inflammation|organ|artery|vein|blood|cardiac|pulmonary|renal|hepatic|neurologic|clinical signs)\b/u;
+    const biologyContext = /\b(biology|biological|cellular|cells?|tissues?|organelle|cytoplasm|mitochondri|ribosom|chromosom|DNA|RNA|gene|genetic|organism|photosynthesis|ecosystem|microscope|histology|embryology)\b/u;
+    const programmingContext = /\b(programming|programmer|software|source code|code|coding|compiler|interpreter|syntax|variable|function|method|class|object|algorithm|debugging|repository|framework|library|runtime|database|developer|IDE|API|script)\b/u;
+    const computingContext = /\b(computer|computing|hardware|operating system|windows|linux|processor|CPU|GPU|RAM|memory address|network|networking|protocol|server|cloud|browser|web development|cybersecurity|encryption|command line|terminal|device driver|firmware)\b/u;
+
+    // Unambiguous terms take priority; surrounding book text helps with broad terms.
+    if (medicalTerms.has(word) || medicalContext.test(context)) {
+      return { key: "medical", label: "Medical / clinical" };
+    }
+    if (lifeScienceTerms.has(word) || biologyContext.test(context)) {
+      return { key: "life-science", label: "Biology / life sciences" };
+    }
+    if (word === "c#" || word === "c++" || programmingLanguages.has(word) ||
+        programmingContext.test(context)) {
+      return { key: "programming", label: "Programming / software" };
+    }
+    if (computingContext.test(context)) {
+      return { key: "technology", label: "Computing / technology" };
+    }
+    return { key: "general", label: "General reference" };
+  }
+
+  function makeSiteSearchUrl(site, word) {
+    return "https://www.google.com/search?q=" + encodeURIComponent("site:" + site + " " + word);
+  }
+
+  function getTopicReferenceSources(word, category) {
+    const source = (title, site) => ({ title, url: makeSiteSearchUrl(site, word) });
+    if (category.key === "medical") {
+      return [
+        source("MedlinePlus medical results", "medlineplus.gov"),
+        source("MSD Manual medical results", "msdmanuals.com"),
+        source("NCBI Bookshelf medical references", "ncbi.nlm.nih.gov/books")
+      ];
+    }
+    if (category.key === "life-science") {
+      return [
+        source("NCBI Bookshelf biology references", "ncbi.nlm.nih.gov/books"),
+        source("OpenStax biology references", "openstax.org")
+      ];
+    }
+    if (category.key === "programming") {
+      if (word.toLocaleLowerCase() === "c#") {
+        return [
+          source("Microsoft Learn — C# documentation", "learn.microsoft.com/en-us/dotnet/csharp"),
+          source("Stack Overflow programming discussions", "stackoverflow.com/questions")
+        ];
+      }
+      const languageSites = {
+        javascript: "developer.mozilla.org",
+        typescript: "www.typescriptlang.org/docs",
+        python: "docs.python.org",
+        java: "docs.oracle.com",
+        rust: "doc.rust-lang.org",
+        golang: "go.dev/doc",
+        go: "go.dev/doc",
+        php: "www.php.net/manual",
+        ruby: "docs.ruby-lang.org",
+        swift: "www.swift.org/documentation",
+        kotlin: "kotlinlang.org/docs",
+        html: "developer.mozilla.org",
+        css: "developer.mozilla.org",
+        sql: "www.postgresql.org/docs"
+      };
+      const site = languageSites[word.toLocaleLowerCase()];
+      return [
+        ...(site ? [source("Official " + word + " documentation", site)] : [
+          source("Microsoft Learn developer documentation", "learn.microsoft.com"),
+          source("MDN Web Docs", "developer.mozilla.org")
+        ]),
+        source("Stack Overflow programming discussions", "stackoverflow.com/questions")
+      ];
+    }
+    if (category.key === "technology") {
+      return [
+        source("Microsoft technical documentation", "learn.microsoft.com"),
+        source("MDN Web Docs", "developer.mozilla.org"),
+        source("Cloudflare technical guides", "cloudflare.com/learning")
+      ];
+    }
+    return [];
+  }
+
+  async function getReferenceDescription(word, category) {
+    const shouldUseDictionary = category.key === "general" || category.key === "medical" ||
+      category.key === "life-science";
+    const requests = [
       fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(word.replace(/ /g, "_"))).then(r => {
         if (!r.ok) throw new Error("No Wikipedia summary");
         return r.json();
       })
-    ]);
+    ];
+    if (shouldUseDictionary) {
+      requests.unshift(fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word)).then(r => {
+        if (!r.ok) throw new Error("Dictionary entry not found");
+        return r.json();
+      }));
+    }
+    const results = await Promise.allSettled(requests);
+    const dictResult = shouldUseDictionary ? results[0] : null;
+    const wikiResult = shouldUseDictionary ? results[1] : results[0];
     const parts = [];
     const sources = [];
-    if (dictResult.status === "fulfilled" && Array.isArray(dictResult.value)) {
+
+    if (dictResult && dictResult.status === "fulfilled" && Array.isArray(dictResult.value)) {
       const entry = dictResult.value[0];
       if (entry.phonetic) parts.push("Pronunciation: " + entry.phonetic);
       (entry.meanings || []).slice(0, 4).forEach(m => {
@@ -1531,43 +1647,50 @@
       });
       sources.push({ title: "Dictionary API", url: "https://dictionaryapi.dev/" });
     }
-    let wikiTitle = "";
     if (wikiResult.status === "fulfilled" && wikiResult.value && wikiResult.value.extract) {
       const w = wikiResult.value;
-      wikiTitle = w.title || word;
       parts.push("Reference overview: " + w.extract);
-      sources.push({ title: "Wikipedia — " + wikiTitle, url: w.content_urls?.desktop?.page || "https://en.wikipedia.org/wiki/" + encodeURIComponent(wikiTitle.replace(/ /g, "_")) });
+      sources.push({
+        title: "Wikipedia — " + (w.title || word),
+        url: w.content_urls?.desktop?.page || "https://en.wikipedia.org/wiki/" + encodeURIComponent((w.title || word).replace(/ /g, "_"))
+      });
     }
-    sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
-    sources.push({ title: "MedlinePlus search", url: "https://medlineplus.gov/search/?q=" + encodeURIComponent(word) });
-    sources.push({ title: "PubMed search", url: "https://pubmed.ncbi.nlm.nih.gov/?term=" + encodeURIComponent(word) });
-    return { description: parts.join("\n\n") || "No automatic dictionary entry was found. Use the reference links below.", sources };
+    if (category.key === "general") {
+      sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
+    }
+    getTopicReferenceSources(word, category).forEach(s => sources.push(s));
+    return {
+      description: parts.join("\n\n") || "No automatic definition was found. Use the topic-specific reference links below.",
+      sources
+    };
   }
-  async function lookupDictionary(rawWord) {
-    const word = String(rawWord || "").trim().replace(/^[()]+|[()]+$/g, "");
+
+  async function lookupDictionary(rawWord, rawContext = "") {
+    const word = String(rawWord || "").trim().replace(/^[()[\]{}]+|[()[\]{}]+$/g, "");
     if (!word || word.length > 100) return;
+    const category = classifyLookupTopic(word, rawContext);
     $("dictionary-dialog").hidden = false;
     $("dictionary-word-input").value = word;
-    $("dictionary-status").textContent = "Loading dictionary references…";
-    setDictionaryCopy("dictionary-definition", "Searching dictionary and reference sources…");
+    $("dictionary-status").textContent = "Category: " + category.label + " · searching relevant references…";
+    setDictionaryCopy("dictionary-definition", "Searching the best-matched reference sources…");
     $("dictionary-sources").innerHTML = "";
-    const cacheKey = "wordLookup:" + word.toLocaleLowerCase();
+    const cacheKey = "wordLookup:" + category.key + ":" + word.toLocaleLowerCase();
     const cached = store.get(cacheKey, null);
     if (cached && Date.now() - cached.savedAt < 30 * 24 * 60 * 60 * 1000) {
       setDictionaryCopy("dictionary-definition", cached.description);
       (cached.sources || []).forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
-      $("dictionary-status").textContent = "Loaded from this browser’s 30-day cache.";
+      $("dictionary-status").textContent = "Category: " + category.label + " · loaded from this browser’s 30-day cache.";
       return;
     }
     try {
-      const reference = await getReferenceDescription(word);
+      const reference = await getReferenceDescription(word, category);
       setDictionaryCopy("dictionary-definition", reference.description);
       reference.sources.forEach(s => appendDictionarySource($("dictionary-sources"), s.title, s.url));
-      $("dictionary-status").textContent = "Dictionary lookup complete.";
+      $("dictionary-status").textContent = "Category: " + category.label + " · lookup complete.";
       store.set(cacheKey, { description: reference.description, sources: reference.sources, savedAt: Date.now() });
     } catch (error) {
       setDictionaryCopy("dictionary-definition", "Reference websites could not be reached. Check your internet connection.");
-      $("dictionary-status").textContent = "Dictionary lookup unavailable.";
+      $("dictionary-status").textContent = "Category: " + category.label + " · lookup unavailable.";
     }
   }
   $("dictionary-word-search").addEventListener("click", () => {
