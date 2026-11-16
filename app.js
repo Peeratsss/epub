@@ -1600,7 +1600,10 @@
   }
   $("helper-toggle").addEventListener("click", () => setHelperEnabled(!helperEnabled));
   $("pdfview").addEventListener("click", (e) => {
-    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) lookupAtPoint(document, e.clientX, e.clientY);\n  });
+    if (mode === "pdf" && e.target.closest && e.target.closest(".textLayer")) {
+      lookupAtPoint(document, e.clientX, e.clientY);
+    }
+  });
   $("pdfview").addEventListener("mousemove", (e) => {
     if (!helperEnabled || mode !== "pdf") return;
     const target = e.target;
