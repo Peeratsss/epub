@@ -1623,8 +1623,9 @@
   }
 
   async function getReferenceDescription(word, category) {
-    const shouldUseDictionary = category.key === "general" || category.key === "medical" ||
-      category.key === "life-science";
+    // Ordinary layman's terms use Wikipedia only. DictionaryAPI is reserved
+    // for specialist medical / life-science terminology where a word definition helps.
+    const shouldUseDictionary = category.key === "medical" || category.key === "life-science";
     const requests = [
       fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(word.replace(/ /g, "_"))).then(r => {
         if (!r.ok) throw new Error("No Wikipedia summary");
@@ -1660,12 +1661,11 @@
         url: w.content_urls?.desktop?.page || "https://en.wikipedia.org/wiki/" + encodeURIComponent((w.title || word).replace(/ /g, "_"))
       });
     }
-    if (category.key === "general") {
-      sources.push({ title: "Wiktionary", url: "https://en.wiktionary.org/wiki/" + encodeURIComponent(word.replace(/ /g, "_")) });
-    }
     getTopicReferenceSources(word, category).forEach(s => sources.push(s));
     return {
-      description: parts.join("\n\n") || "No automatic definition was found. Use the topic-specific reference links below.",
+      description: parts.join("\n\n") || (category.key === "general"
+        ? "No Wikipedia overview was available for this term."
+        : "No automatic definition was found. Use the topic-specific reference links below."),
       sources
     };
   }
