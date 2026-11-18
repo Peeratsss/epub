@@ -612,14 +612,22 @@
     }));
     if(!main) main=parsed.body;
     const article=main.cloneNode(true);
-    article.querySelectorAll("a").forEach(a=>{try{const u=new URL(a.getAttribute("href")||"",pageUrl);if(!/^https?:$/.test(u.protocol)){a.removeAttribute("href");return;}a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";}catch{a.removeAttribute("href");}});
-    article.querySelectorAll("img").forEach(img=>{const src=img.getAttribute("src")||img.getAttribute("data-src");if(src)try{img.src=new URL(src,pageUrl).href;}catch{}img.removeAttribute("srcset");img.removeAttribute("data-src");img.removeAttribute("loading");});
+    article.querySelectorAll("a").forEach(a=>{try{const href=a.getAttribute("href")||"";const u=pageUrl?new URL(href,pageUrl):new URL(href);if(!/^https?:$/.test(u.protocol)){a.removeAttribute("href");return;}a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";}catch{a.removeAttribute("href");}});
+    article.querySelectorAll("img").forEach(img=>{const src=img.getAttribute("src")||img.getAttribute("data-src");if(src)try{const u=pageUrl?new URL(src,pageUrl):new URL(src);if(/^https?:$/.test(u.protocol))img.src=u.href;else img.removeAttribute("src");}catch{img.removeAttribute("src");}img.removeAttribute("srcset");img.removeAttribute("data-src");img.removeAttribute("loading");});
     article.querySelectorAll("video,audio,source,canvas,object,embed").forEach(n=>n.remove());
     article.querySelectorAll("*").forEach(el=>{[...el.attributes].forEach(attr=>{if(/^on/i.test(attr.name)||["style","class","id"].includes(attr.name))el.removeAttribute(attr.name);});});
     const title=(parsed.querySelector('meta[property="og:title"]')?.content||parsed.querySelector("h1")?.innerText||parsed.title||"Web article").trim().replace(/[<>&]/g,"");
     const author=parsed.querySelector('meta[name="author"]')?.content||parsed.querySelector('[rel=author]')?.innerText||"";
     const date=parsed.querySelector('meta[property="article:published_time"]')?.content||parsed.querySelector("time")?.dateTime||"";
     return {title,author:author.trim(),date,content:article.innerHTML,source:pageUrl};
+  }
+  async function saveImportedArticle(article, fallbackAuthor) {
+    if((article.content||"").replace(/<[^>]+>/g," ").trim().length<150) throw Error("Not enough article content was found.");
+    const id="article-"+Date.now().toString(36);
+    const host=article.source?new URL(article.source).hostname:"Imported HTML";
+    await saveBook({id,type:"article",title:article.title,author:article.author||fallbackAuthor||host,source:article.source||"",date:article.date,added:Date.now()},article.content);
+    await renderLibrary();
+    toast("Cleaned article saved to your Bookshelf.");
   }
   async function importArticleUrl() {
     const raw=prompt("Paste article URL:"); if(!raw)return;
@@ -629,18 +637,33 @@
       const response=await fetch(url.href,{credentials:"omit",redirect:"follow"});
       if(!response.ok)throw Error("HTTP "+response.status);
       const article=cleanArticleHtml(await response.text(),url.href);
-      if((article.content||"").replace(/<[^>]+>/g," ").trim().length<350)throw Error("Not enough article content");
-      const id="article-"+Date.now().toString(36);
-      await saveBook({id,type:"article",title:article.title,author:article.author||new URL(article.source).hostname,source:article.source,date:article.date,added:Date.now()},article.content);
-      await renderLibrary();toast("Article cleaned and saved to your Bookshelf.");
-    }catch(err){console.warn("Article import failed",err);toast("This site blocks URL import (CORS). Try saving the webpage as HTML or PDF, then import it.");}
+      await saveImportedArticle(article,new URL(article.source).hostname);
+    }catch(err){console.warn("Article import failed",err);toast("This site blocks URL import (CORS). Try Add HTML and choose a saved webpage file.");}
+  }
+  async function importArticleHtml(file) {
+    if(!file)return;
+    toast("Cleaning HTML article…");
+    try{
+      const raw=await file.text();
+      const sourceDoc=new DOMParser().parseFromString(raw,"text/html");
+      const candidate=sourceDoc.querySelector("base[href]")?.getAttribute("href")
+        ||sourceDoc.querySelector('link[rel="canonical"]')?.getAttribute("href")
+        ||sourceDoc.querySelector('meta[property="og:url"]')?.content
+        ||"";
+      let source="";
+      try{const u=new URL(candidate);if(/^https?:$/.test(u.protocol))source=u.href;}catch{}
+      const article=cleanArticleHtml(raw,source);
+      article.source=source;
+      await saveImportedArticle(article,file.name.replace(/\.html?$/i,"")||"Imported HTML");
+    }catch(err){console.warn("HTML article import failed",err);toast("Could not clean this HTML file. Try saving the webpage as a complete HTML page.");}
   }
   function openArticle(meta,rec){
     mode="article";setModeUI();const host=$("article-view");host.hidden=false;host.innerHTML="";
     const frame=document.createElement("iframe");frame.className="article-frame";frame.setAttribute("sandbox","allow-same-origin allow-popups allow-modals");frame.title=meta.title;
     const title=(meta.title||"Article").replace(/[<>&]/g,"");
     const cssText="body{font-family:Georgia,serif;font-size:"+fontSize+"%;line-height:1.7;max-width:780px;margin:40px auto;padding:24px;color:#24212a;background:#fff}h1,h2,h3,h4{line-height:1.25}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid #ccc;padding:6px}a{color:#6b45b1}blockquote{border-left:3px solid #ccc;padding-left:1em;color:#555}.article-source{font:14px system-ui;color:#666;border-bottom:1px solid #ddd;padding-bottom:12px;margin-bottom:24px;overflow-wrap:anywhere}";
-    frame.srcdoc='<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>'+cssText+'</style></head><body><h1>'+title+'</h1><div class="article-source">'+(meta.author||"")+(meta.date?" · "+meta.date:"")+'<br><a href="'+meta.source+'">'+meta.source+'</a></div>'+rec.data+'</body></html>';
+    const sourceLine=meta.source?'<br><a href="'+meta.source+'">'+meta.source+'</a>':"";
+    frame.srcdoc='<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>'+cssText+'</style></head><body><h1>'+title+'</h1><div class="article-source">'+(meta.author||"")+(meta.date?" · "+meta.date:"")+sourceLine+'</div>'+rec.data+'</body></html>';
     host.appendChild(frame);
   }
   function exportArticlePdf(){if(!current||current.type!=="article")return;const frame=$("article-view").querySelector("iframe");if(!frame||!frame.contentDocument){toast("Article is still loading.");return;}try{frame.contentWindow.focus();frame.contentWindow.print();}catch{toast("Could not open print dialog.");}}
@@ -2158,6 +2181,12 @@
   /* ---------- Wire up UI ---------- */
   $("file-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
   $("add-url").addEventListener("click", importArticleUrl);
+  $("add-html").addEventListener("click", () => $("html-input").click());
+  $("html-input").addEventListener("change", (e) => {
+    const file=e.target.files&&e.target.files[0];
+    if(file) importArticleHtml(file);
+    e.target.value="";
+  });
   $("article-export").addEventListener("click", exportArticlePdf);
   $("backup-export").addEventListener("click", exportAnnotationBackup);
   $("backup-input").addEventListener("change", (e) => {
