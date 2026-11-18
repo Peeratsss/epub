@@ -24,6 +24,7 @@
         <label class="btn restore-backup" for="backup-input">↑ Restore</label>
         <input id="backup-input" type="file" accept=".json,application/json" hidden>
       </div>
+      <button id="add-url" class="btn" type="button">↗ Add URL</button>
       <label class="btn primary add-book"><span>＋</span> Add book
         <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
       </label>
@@ -78,6 +79,7 @@
         <button id="settings-btn" class="btn" title="Text settings">Aa</button>
         <button id="helper-toggle" class="btn helper-toggle" type="button" title="Turn Reading Helper on or off" aria-pressed="false">◎ Helper</button>
 <button id="dictionary-toggle" class="btn dictionary-toggle" type="button" title="Turn word lookup on or off" aria-pressed="true">⌕ Lookup: On</button>
+        <button id="article-export" class="btn" type="button" hidden title="Export article as PDF">↓ PDF</button>
       </div>
     </header>
 
@@ -95,6 +97,7 @@
       <aside id="toc" class="panel left" hidden></aside>
 
       <button id="prev" class="nav" aria-label="Previous page">‹</button>
+      <div id="article-view" hidden></div>
       <div id="epub-sheet"><div id="viewer"></div></div>
       <div id="pdfview" hidden><div id="pdfpage"></div></div>
       <button id="next" class="nav" aria-label="Next page">›</button>
