@@ -602,7 +602,7 @@
   }
 
   /* ---------- URL article import ---------- */
-  function cleanArticleHtml(rawHtml, pageUrl) {
+  function cleanArticleHtml(rawHtml, pageUrl, assetMap, htmlPath) {
     const parsed = new DOMParser().parseFromString(rawHtml, "text/html");
     const junkSelectors = ["script","style","noscript","iframe","svg","form","button","input","select","textarea","nav","header","footer","aside","[role=navigation]","[role=banner]","[role=contentinfo]","[aria-label*=advert i]","[class*=advert i]","[id*=advert i]","[class*=promo i]","[class*=banner i]","[class*=social i]","[class*=share i]","[class*=newsletter i]","[class*=subscribe i]","[class*=related i]","[class*=recommend i]","[class*=recent i]","[class*=cookie i]","[class*=popup i]","[class*=modal i]","[class*=breadcrumb i]"];
     junkSelectors.forEach(sel => { try { parsed.querySelectorAll(sel).forEach(n => n.remove()); } catch {} });
@@ -613,7 +613,21 @@
     if(!main) main=parsed.body;
     const article=main.cloneNode(true);
     article.querySelectorAll("a").forEach(a=>{try{const href=a.getAttribute("href")||"";const u=pageUrl?new URL(href,pageUrl):new URL(href);if(!/^https?:$/.test(u.protocol)){a.removeAttribute("href");return;}a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";}catch{a.removeAttribute("href");}});
-    article.querySelectorAll("img").forEach(img=>{const src=img.getAttribute("src")||img.getAttribute("data-src");if(src)try{const u=pageUrl?new URL(src,pageUrl):new URL(src);if(/^https?:$/.test(u.protocol))img.src=u.href;else img.removeAttribute("src");}catch{img.removeAttribute("src");}img.removeAttribute("srcset");img.removeAttribute("data-src");img.removeAttribute("loading");});
+    article.querySelectorAll("img").forEach(img=>{
+      const src=img.getAttribute("src")||img.getAttribute("data-src")||img.getAttribute("data-original")||img.getAttribute("data-lazy-src");
+      let resolved=false;
+      if(src && assetMap && htmlPath && !/^(https?:|data:|blob:)/i.test(src)){
+        try{
+          const dir=htmlPath.split("/").slice(0,-1).join("/");
+          const path=decodeURIComponent(new URL(src,"https://local.invalid/"+dir+"/").pathname).replace(/^\//,"");
+          const embedded=assetMap.get(path);
+          if(embedded){img.setAttribute("src",embedded);resolved=true;}
+        }catch{}
+      }
+      if(src && !resolved)try{const u=pageUrl?new URL(src,pageUrl):new URL(src);if(/^https?:$/.test(u.protocol)){img.src=u.href;resolved=true;}}catch{}
+      if(!resolved)img.removeAttribute("src");
+      img.removeAttribute("srcset");img.removeAttribute("data-src");img.removeAttribute("data-original");img.removeAttribute("data-lazy-src");img.removeAttribute("loading");
+    });
     article.querySelectorAll("video,audio,source,canvas,object,embed").forEach(n=>n.remove());
     article.querySelectorAll("*").forEach(el=>{[...el.attributes].forEach(attr=>{if(/^on/i.test(attr.name)||["style","class","id"].includes(attr.name))el.removeAttribute(attr.name);});});
     const title=(parsed.querySelector('meta[property="og:title"]')?.content||parsed.querySelector("h1")?.innerText||parsed.title||"Web article").trim().replace(/[<>&]/g,"");
@@ -640,22 +654,29 @@
       await saveImportedArticle(article,new URL(article.source).hostname);
     }catch(err){console.warn("Article import failed",err);toast("This site blocks URL import (CORS). Try Add HTML and choose a saved webpage file.");}
   }
-  async function importArticleHtml(file) {
+  async function importArticleHtml(file, selectedFiles) {
     if(!file)return;
-    toast("Cleaning HTML article…");
+    toast("Reading webpage and images…");
     try{
+      const allFiles=Array.from(selectedFiles||[file]);
+      const relativePath=f=>(f.webkitRelativePath||f.name).split("/").slice(f.webkitRelativePath?1:0).join("/");
+      const imageFiles=allFiles.filter(f=>/^image\//i.test(f.type)||/\.(jpe?g|png|gif|webp|svg|avif|bmp)$/i.test(f.name));
+      const assetMap=new Map();let embeddedBytes=0;
+      for(const imageFile of imageFiles){
+        if(imageFile.size>5*1024*1024||embeddedBytes+imageFile.size>20*1024*1024)continue;
+        const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(reader.error);reader.readAsDataURL(imageFile);});
+        assetMap.set(relativePath(imageFile),dataUrl);embeddedBytes+=imageFile.size;
+      }
       const raw=await file.text();
       const sourceDoc=new DOMParser().parseFromString(raw,"text/html");
       const candidate=sourceDoc.querySelector("base[href]")?.getAttribute("href")
         ||sourceDoc.querySelector('link[rel="canonical"]')?.getAttribute("href")
-        ||sourceDoc.querySelector('meta[property="og:url"]')?.content
-        ||"";
-      let source="";
-      try{const u=new URL(candidate);if(/^https?:$/.test(u.protocol))source=u.href;}catch{}
-      const article=cleanArticleHtml(raw,source);
+        ||sourceDoc.querySelector('meta[property="og:url"]')?.content||"";
+      let source="";try{const u=new URL(candidate);if(/^https?:$/.test(u.protocol))source=u.href;}catch{}
+      const article=cleanArticleHtml(raw,source,assetMap,relativePath(file));
       article.source=source;
       await saveImportedArticle(article,file.name.replace(/\.html?$/i,"")||"Imported HTML");
-    }catch(err){console.warn("HTML article import failed",err);toast("Could not clean this HTML file. Try saving the webpage as a complete HTML page.");}
+    }catch(err){console.warn("HTML article import failed",err);toast("Could not import this webpage. Choose the HTML file inside its Complete folder.");}
   }
   function openArticle(meta,rec){
     mode="article";setModeUI();const host=$("article-view");host.hidden=false;host.innerHTML="";
@@ -2183,8 +2204,10 @@
   $("add-url").addEventListener("click", importArticleUrl);
   $("add-html").addEventListener("click", () => $("html-input").click());
   $("html-input").addEventListener("change", (e) => {
-    const file=e.target.files&&e.target.files[0];
-    if(file) importArticleHtml(file);
+    const files=Array.from(e.target.files||[]);
+    const file=files.find(f=>/\.html?$/i.test(f.name));
+    if(file) importArticleHtml(file,files);
+    else if(files.length)toast("Choose the .html file inside the saved webpage folder.");
     e.target.value="";
   });
   $("article-export").addEventListener("click", exportArticlePdf);
