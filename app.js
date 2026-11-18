@@ -563,12 +563,15 @@
 
   // show only the controls that make sense for the open file type
   function setModeUI() {
-    const isPdf = mode === "pdf";
+    const isPdf = mode === "pdf", isArticle = mode === "article";
     ["font-field", "size-field", "lh-field"].forEach((id) => ($(id).hidden = isPdf));
     $("zoom-field").hidden = !isPdf;
-    $("book-theme-field").hidden = isPdf;
-    $("epub-sheet").hidden = isPdf;
+    $("book-theme-field").hidden = isPdf || isArticle;
+    $("epub-sheet").hidden = isPdf || isArticle;
     $("pdfview").hidden = !isPdf;
+    $("article-view").hidden = !isArticle;
+    $("prev").hidden = isArticle; $("next").hidden = isArticle;
+    $("article-export").hidden = !isArticle;
     $("settings-title").textContent = isPdf ? "PDF settings" : "Text settings";
   }
 
@@ -597,6 +600,49 @@
     return { title, author, cover };
   }
 
+  /* ---------- URL article import ---------- */
+  function cleanArticleHtml(rawHtml, pageUrl) {
+    const parsed = new DOMParser().parseFromString(rawHtml, "text/html");
+    const junkSelectors = ["script","style","noscript","iframe","svg","form","button","input","select","textarea","nav","header","footer","aside","[role=navigation]","[role=banner]","[role=contentinfo]","[aria-label*=advert i]","[class*=advert i]","[id*=advert i]","[class*=promo i]","[class*=banner i]","[class*=social i]","[class*=share i]","[class*=newsletter i]","[class*=subscribe i]","[class*=related i]","[class*=recommend i]","[class*=recent i]","[class*=cookie i]","[class*=popup i]","[class*=modal i]","[class*=breadcrumb i]"];
+    junkSelectors.forEach(sel => { try { parsed.querySelectorAll(sel).forEach(n => n.remove()); } catch {} });
+    let main=null, score=0;
+    ["article","main","[role=main]","[itemprop=articleBody]"].forEach(sel => parsed.querySelectorAll(sel).forEach(node => {
+      const len=(node.innerText||"").trim().length; if(len>score && len>600){score=len;main=node;}
+    }));
+    if(!main) main=parsed.body;
+    const article=main.cloneNode(true);
+    article.querySelectorAll("a").forEach(a=>{try{const u=new URL(a.getAttribute("href")||"",pageUrl);if(!/^https?:$/.test(u.protocol)){a.removeAttribute("href");return;}a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";}catch{a.removeAttribute("href");}});
+    article.querySelectorAll("img").forEach(img=>{const src=img.getAttribute("src")||img.getAttribute("data-src");if(src)try{img.src=new URL(src,pageUrl).href;}catch{}img.removeAttribute("srcset");img.removeAttribute("data-src");img.removeAttribute("loading");});
+    article.querySelectorAll("video,audio,source,canvas,object,embed").forEach(n=>n.remove());
+    article.querySelectorAll("*").forEach(el=>{[...el.attributes].forEach(attr=>{if(/^on/i.test(attr.name)||["style","class","id"].includes(attr.name))el.removeAttribute(attr.name);});});
+    const title=(parsed.querySelector('meta[property="og:title"]')?.content||parsed.querySelector("h1")?.innerText||parsed.title||"Web article").trim().replace(/[<>&]/g,"");
+    const author=parsed.querySelector('meta[name="author"]')?.content||parsed.querySelector('[rel=author]')?.innerText||"";
+    const date=parsed.querySelector('meta[property="article:published_time"]')?.content||parsed.querySelector("time")?.dateTime||"";
+    return {title,author:author.trim(),date,content:article.innerHTML,source:pageUrl};
+  }
+  async function importArticleUrl() {
+    const raw=prompt("Paste article URL:"); if(!raw)return;
+    let url;try{url=new URL(raw.trim());if(!/^https?:$/.test(url.protocol))throw 0;}catch{toast("Please enter a valid http or https URL.");return;}
+    toast("Fetching and cleaning article…");
+    try{
+      const response=await fetch(url.href,{credentials:"omit",redirect:"follow"});
+      if(!response.ok)throw Error("HTTP "+response.status);
+      const article=cleanArticleHtml(await response.text(),url.href);
+      if((article.content||"").replace(/<[^>]+>/g," ").trim().length<350)throw Error("Not enough article content");
+      const id="article-"+Date.now().toString(36);
+      await saveBook({id,type:"article",title:article.title,author:article.author||new URL(article.source).hostname,source:article.source,date:article.date,added:Date.now()},article.content);
+      await renderLibrary();toast("Article cleaned and saved to your Bookshelf.");
+    }catch(err){console.warn("Article import failed",err);toast("This site blocks URL import (CORS). Try saving the webpage as HTML or PDF, then import it.");}
+  }
+  function openArticle(meta,rec){
+    mode="article";setModeUI();const host=$("article-view");host.hidden=false;host.innerHTML="";
+    const frame=document.createElement("iframe");frame.className="article-frame";frame.setAttribute("sandbox","allow-same-origin allow-popups");frame.title=meta.title;
+    const title=(meta.title||"Article").replace(/[<>&]/g,"");
+    const cssText="body{font-family:Georgia,serif;font-size:"+fontSize+"%;line-height:1.7;max-width:780px;margin:40px auto;padding:24px;color:#24212a;background:#fff}h1,h2,h3,h4{line-height:1.25}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid #ccc;padding:6px}a{color:#6b45b1}blockquote{border-left:3px solid #ccc;padding-left:1em;color:#555}.article-source{font:14px system-ui;color:#666;border-bottom:1px solid #ddd;padding-bottom:12px;margin-bottom:24px;overflow-wrap:anywhere}";
+    frame.srcdoc='<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>'+cssText+'</style></head><body><h1>'+title+'</h1><div class="article-source">'+(meta.author||"")+(meta.date?" · "+meta.date:"")+'<br><a href="'+meta.source+'">'+meta.source+'</a></div>'+rec.data+'</body></html>';
+    host.appendChild(frame);
+  }
+  function exportArticlePdf(){if(!current||current.type!=="article")return;const frame=$("article-view").querySelector("iframe");if(!frame||!frame.contentDocument){toast("Article is still loading.");return;}try{frame.contentWindow.focus();frame.contentWindow.print();}catch{toast("Could not open print dialog.");}}
   async function addFile(file) {
     const isPdf = /\.pdf$/i.test(file.name);
     const isEpub = /\.epub$/i.test(file.name);
@@ -653,7 +699,7 @@
       const cover = card.querySelector(".cover");
       if (b.cover) cover.style.backgroundImage = `url("${b.cover}")`; else cover.textContent = b.title;
       card.querySelector(".name").textContent = b.title;
-      card.querySelector(".author").textContent = (b.type === "pdf" ? "PDF" : "EPUB") + (b.author ? " · " + b.author : "");
+      card.querySelector(".author").textContent = (b.type === "pdf" ? "PDF" : b.type === "article" ? "ARTICLE" : "EPUB") + (b.author ? " · " + b.author : "");
       const bookStats = readingStats.books[b.id];
       if (bookStats && ((Number(bookStats.totalSeconds) || 0) > 0 || (Array.isArray(bookStats.seenPages) && bookStats.seenPages.length))) {
         card.querySelector(".reading-stats").textContent =
@@ -690,6 +736,7 @@
     $("reader").hidden = false;
     $("book-title").textContent = meta.title;
     if (meta.type === "pdf") return openPdf(meta, rec);
+    if (meta.type === "article") return openArticle(meta, rec);
     return openEpub(meta, rec);
   }
 
@@ -795,6 +842,7 @@
     pendingSel = null;
     $("viewer").innerHTML = "";
     $("pdfpage").innerHTML = "";
+    $("article-view").innerHTML = ""; $("article-view").hidden=true;
     $("toc").innerHTML = "";
     setModeUI(); $("pdfview").hidden = true; $("viewer").hidden = false;
     hidePanels(); hideSelbar();
@@ -2108,6 +2156,8 @@
 
   /* ---------- Wire up UI ---------- */
   $("file-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+  $("add-url").addEventListener("click", importArticleUrl);
+  $("article-export").addEventListener("click", exportArticlePdf);
   $("backup-export").addEventListener("click", exportAnnotationBackup);
   $("backup-input").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
