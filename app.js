@@ -572,6 +572,7 @@
     $("article-view").hidden = !isArticle;
     $("prev").hidden = isArticle; $("next").hidden = isArticle;
     $("article-export").hidden = !isArticle;
+    ["bm-btn","notes-btn","toc-btn","settings-btn","helper-toggle","dictionary-toggle"].forEach(id => { $(id).hidden = isArticle; });
     $("settings-title").textContent = isPdf ? "PDF settings" : "Text settings";
   }
 
@@ -636,7 +637,7 @@
   }
   function openArticle(meta,rec){
     mode="article";setModeUI();const host=$("article-view");host.hidden=false;host.innerHTML="";
-    const frame=document.createElement("iframe");frame.className="article-frame";frame.setAttribute("sandbox","allow-same-origin allow-popups");frame.title=meta.title;
+    const frame=document.createElement("iframe");frame.className="article-frame";frame.setAttribute("sandbox","allow-same-origin allow-popups allow-modals");frame.title=meta.title;
     const title=(meta.title||"Article").replace(/[<>&]/g,"");
     const cssText="body{font-family:Georgia,serif;font-size:"+fontSize+"%;line-height:1.7;max-width:780px;margin:40px auto;padding:24px;color:#24212a;background:#fff}h1,h2,h3,h4{line-height:1.25}img{max-width:100%;height:auto}table{max-width:100%;border-collapse:collapse;display:block;overflow:auto}td,th{border:1px solid #ccc;padding:6px}a{color:#6b45b1}blockquote{border-left:3px solid #ccc;padding-left:1em;color:#555}.article-source{font:14px system-ui;color:#666;border-bottom:1px solid #ddd;padding-bottom:12px;margin-bottom:24px;overflow-wrap:anywhere}";
     frame.srcdoc='<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>'+cssText+'</style></head><body><h1>'+title+'</h1><div class="article-source">'+(meta.author||"")+(meta.date?" · "+meta.date:"")+'<br><a href="'+meta.source+'">'+meta.source+'</a></div>'+rec.data+'</body></html>';
