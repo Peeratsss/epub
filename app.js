@@ -26,6 +26,7 @@
   const req = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
   const getAllMeta = () => dbRun(["meta"], "readonly", (m) => req(m.getAll()));
+  const putMeta = (meta) => dbRun(["meta"], "readwrite", (m) => { m.put(meta); });
   const getFile = (id) => dbRun(["files"], "readonly", (f) => req(f.get(id)));
   const saveBook = (meta, data) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.put(meta); f.put({ id: meta.id, data }); });
@@ -740,6 +741,7 @@
         <div class="reading-stats"></div>
         <div class="prog"><i></i></div>
         <div class="pct"></div>
+        <button class="rename" title="Edit title" aria-label="Edit title">✎</button>
         <button class="del" title="Remove">×</button>`;
       const cover = card.querySelector(".cover");
       if (b.cover) cover.style.backgroundImage = `url("${b.cover}")`; else cover.textContent = b.title;
@@ -756,6 +758,19 @@
         card.style.setProperty("--p", Math.min(100, Math.max(0, pos.pct)) + "%");
       }
       card.addEventListener("click", () => openBook(b));
+      card.querySelector(".rename").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const nextTitle=prompt("Edit book title:",b.title||"");
+        if(nextTitle===null)return;
+        const title=nextTitle.trim();
+        if(!title){toast("Title cannot be empty.");return;}
+        if(title===b.title)return;
+        b.title=title;
+        await putMeta(b);
+        if(readingStats.books[b.id]){readingStats.books[b.id].title=title;store.set(READING_STATS_KEY,readingStats);}
+        renderLibrary();
+        toast("Title updated.");
+      });
       card.querySelector(".del").addEventListener("click", async (e) => {
         e.stopPropagation();
         if (confirm(`Remove “${b.title}” from your library? Its bookmarks and notes will be deleted too.`)) {
