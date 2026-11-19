@@ -4,10 +4,11 @@
   /* ---------- IndexedDB: 'meta' (small) + 'files' (the book bytes) ---------- */
   function openDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open("epub-reader", 1);
+      const req = indexedDB.open("epub-reader", 2);
       req.onupgradeneeded = () => {
-        req.result.createObjectStore("meta", { keyPath: "id" });
-        req.result.createObjectStore("files", { keyPath: "id" });
+        const db = req.result;
+        if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("files")) db.createObjectStore("files", { keyPath: "id" });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
