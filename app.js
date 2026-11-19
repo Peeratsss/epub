@@ -33,9 +33,9 @@
   const saveBook = (meta, data) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.put(meta); f.put({ id: meta.id, data }); });
   const getPdfOcr = (bookId, pageNo) =>
-    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":v4:" + pageNo)));
+    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":v5:" + pageNo)));
   const putPdfOcr = (bookId, pageNo, value) =>
-    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":v4:" + pageNo }); });
+    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":v5:" + pageNo }); });
   const deleteBook = (id) =>
     dbRun(["meta", "files", "pdfocr"], "readwrite", (m, f, o) => {
       m.delete(id); f.delete(id);
@@ -1236,12 +1236,15 @@
       const height = Math.max(5, (box.y1 - box.y0) * scaleY);
       const fontSize = height * 0.82;
       const span = document.createElement("span");
-      span.textContent = text;
+      span.textContent = text + " ";
       span.dataset.ocr = "1";
       // Match the OCR word's measured image box. Keep the unscaled text width
       // as the CSS width, then compress/expand it exactly once to the OCR box.
       measure.font = fontSize + "px Arial";
-      const naturalWidth = Math.max(1, measure.measureText(text).width);
+      const naturalWidth = Math.max(1, measure.measureText(text + " ").width);
+      span.style.color = "transparent";
+      span.style.background = "transparent";
+      span.style.textShadow = "none";
       span.style.left = left + "px";
       span.style.top = (top - (height - fontSize) * 0.5) + "px";
       span.style.height = height + "px";
