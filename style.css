@@ -129,7 +129,7 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 
 /* Continuous PDF pages and clickable PDF link annotations */
 #pdfview{scroll-behavior:auto}
-#pdfpage{display:flex;flex-direction:column;align-items:center;gap:22px;min-width:100%;box-shadow:none;background:transparent}#pdfpage[hidden]{display:none}
+#pdfpage{display:flex;flex-direction:column;align-items:center;gap:22px;min-width:100%;box-shadow:none;background:transparent}
 .pdf-page{position:relative;flex:none;margin:0 auto;background:#fff;box-shadow:var(--shadow);overflow:hidden}
 #reader[data-book-theme=dark] .pdf-page canvas,#reader[data-book-theme=slate] .pdf-page canvas{filter:invert(1) hue-rotate(180deg)}
 .pdf-page canvas{display:block}
@@ -305,10 +305,3 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 
 
 
-
-/* OCR text mode: reconstructed, readable pages while preserving the original scan. */
-#ocr-text-view{width:100%;display:flex;flex-direction:column;align-items:center;gap:22px;padding:0 0 24px}
-#ocr-text-view[hidden]{display:none}
-.ocr-page{box-sizing:border-box;width:min(100%,820px);min-height:1050px;padding:72px 76px;background:#fff;color:#24212a;box-shadow:var(--shadow);font-family:Georgia,'Times New Roman',serif;font-size:17px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}
-.ocr-page-text{white-space:pre-wrap}
-@media(max-width:700px){.ocr-page{min-height:0;padding:30px 24px;font-size:15px}}
