@@ -31,7 +31,7 @@
   const saveBook = (meta, data) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.put(meta); f.put({ id: meta.id, data }); });
   const deleteBook = (id) =>
-    dbRun(["meta", "files"], "readwrite", (m, f) => { m.delete(id); f.delete(id); });
+    dbRun(["meta", "files"], "readwrite", (m, f) => { m.delete(id); f.delete(id); f.delete("ocr:" + id); });
 
   /* ---------- Settings & per-book data ---------- */
   const store = {
@@ -2392,7 +2392,7 @@
   $("modal").addEventListener("click", (e) => { if (e.target === $("modal")) closeNote(); });
 
   $("pdfview").addEventListener("scroll", () => {
-    if (mode !== "pdf" || !pdf) return;
+    if (mode !== "pdf" || !pdf || pdfTextMode) return;
     clearTimeout(pdfScrollTimer);
     pdfScrollTimer = setTimeout(() => {
       const viewRect = $("pdfview").getBoundingClientRect();
