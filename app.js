@@ -70,6 +70,7 @@
   let fontIdx = store.get("fontIdx", 0);
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
   let pdfZoom = store.get("pdfZoom", 1);
+  let forcedImageRead = store.get("forcedImageRead", false) === true;
   let helperEnabled = store.get("helperEnabled", false);
   let dictionaryEnabled = store.get("dictionaryEnabled", true);
   let helperMode = store.get("helperMode", "underline");
@@ -496,6 +497,7 @@
     $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
     $("zoom-range").value = Math.round(pdfZoom * 100); $("zoom-label").textContent = Math.round(pdfZoom * 100) + "%";
     $("helper-mode").value = helperMode;
+    $("forced-image-read").checked = forcedImageRead;
     $("helper-left-words").value = helperLeftWords;
     $("helper-right-words").value = helperRightWords;
     updateHelperRangeLabels();
@@ -515,6 +517,21 @@
       store.set("helperRightWords", helperRightWords);
       updateHelperRangeLabels();
       helperDocs.forEach(clearHelperDoc);
+    });
+    $("forced-image-read").addEventListener("change", async (e) => {
+      forcedImageRead = e.target.checked;
+      store.set("forcedImageRead", forcedImageRead);
+      if (mode !== "pdf" || !pdf) return;
+      const doc = pdf;
+      const page = pdfPage;
+      try {
+        await setupContinuousPdf();
+        if (doc !== pdf) return;
+        await renderPdfPage(page);
+        if (doc === pdf) pdfGo(page);
+      } catch (err) {
+        if (doc === pdf) openFailed(err);
+      }
     });
     $("helper-mode").addEventListener("change", (e) => {
       helperMode = e.target.value; store.set("helperMode", helperMode);
@@ -578,6 +595,7 @@
     const isPdf = mode === "pdf", isArticle = mode === "article";
     ["font-field", "size-field", "lh-field"].forEach((id) => ($(id).hidden = isPdf));
     $("zoom-field").hidden = !isPdf;
+    $("forced-image-read-field").hidden = !isPdf;
     $("book-theme-field").hidden = isPdf || isArticle;
     $("epub-sheet").hidden = isPdf || isArticle;
     $("pdfview").hidden = !isPdf;
@@ -1236,13 +1254,16 @@
   async function addScannedPdfTextLayer(doc, pageNo, canvas, textLayer, viewport, textContent) {
     const existingChars = (textContent.items || []).reduce((sum, item) =>
       sum + String(item.str || "").trim().length, 0);
-    if (existingChars >= 20 || !current || doc !== pdf || !textLayer.isConnected) return;
+    if ((!forcedImageRead && existingChars >= 20) || !current || doc !== pdf || !textLayer.isConnected) return;
     if (!pdfOcrNoticeShown) {
       pdfOcrNoticeShown = true;
-      toast("Scanned page detected. Preparing selectable text…");
+      toast(forcedImageRead ? "Forced image reading is on. Recognizing page text…" : "Scanned page detected. Preparing selectable text…");
     }
     const ocr = await recognizeScannedPdfPage(doc, pageNo, canvas);
     if (!ocr || doc !== pdf || !textLayer.isConnected) return;
+    // In forced mode, discard the PDF's embedded text (which may only be a watermark)
+    // and use text recognized from the visible page image instead.
+    if (forcedImageRead) textLayer.replaceChildren();
     addOcrWordsToTextLayer(textLayer, ocr.words, viewport.width / ocr.width, viewport.height / ocr.height);
   }
 
