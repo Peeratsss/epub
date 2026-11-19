@@ -129,7 +129,7 @@ body[data-theme=dark] .hl-rect,body[data-theme=slate] .hl-rect{mix-blend-mode:no
 
 /* Continuous PDF pages and clickable PDF link annotations */
 #pdfview{scroll-behavior:auto}
-#pdfpage{display:flex;flex-direction:column;align-items:center;gap:22px;min-width:100%;box-shadow:none;background:transparent}
+#pdfpage{display:flex;flex-direction:column;align-items:center;gap:22px;min-width:100%;box-shadow:none;background:transparent}#pdfpage[hidden]{display:none}
 .pdf-page{position:relative;flex:none;margin:0 auto;background:#fff;box-shadow:var(--shadow);overflow:hidden}
 #reader[data-book-theme=dark] .pdf-page canvas,#reader[data-book-theme=slate] .pdf-page canvas{filter:invert(1) hue-rotate(180deg)}
 .pdf-page canvas{display:block}
