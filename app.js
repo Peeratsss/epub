@@ -33,9 +33,9 @@
   const saveBook = (meta, data) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.put(meta); f.put({ id: meta.id, data }); });
   const getPdfOcr = (bookId, pageNo) =>
-    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":v2:" + pageNo)));
+    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":v3:" + pageNo)));
   const putPdfOcr = (bookId, pageNo, value) =>
-    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":v2:" + pageNo }); });
+    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":v3:" + pageNo }); });
   const deleteBook = (id) =>
     dbRun(["meta", "files", "pdfocr"], "readwrite", (m, f, o) => {
       m.delete(id); f.delete(id);
@@ -1166,7 +1166,7 @@
           document.head.appendChild(script);
         });
       }
-      return window.Tesseract.createWorker("eng", 1, {
+      return window.Tesseract.createWorker("tgl+eng", 1, {
         workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
         corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0",
         langPath: "https://tessdata.projectnaptha.com/4.0.0"
