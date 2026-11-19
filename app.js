@@ -4,12 +4,10 @@
   /* ---------- IndexedDB: 'meta' (small) + 'files' (the book bytes) ---------- */
   function openDB() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open("epub-reader", 2);
+      const req = indexedDB.open("epub-reader", 1);
       req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("files")) db.createObjectStore("files", { keyPath: "id" });
-        if (!db.objectStoreNames.contains("pdfocr")) db.createObjectStore("pdfocr", { keyPath: "id" });
+        req.result.createObjectStore("meta", { keyPath: "id" });
+        req.result.createObjectStore("files", { keyPath: "id" });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -32,16 +30,8 @@
   const getFile = (id) => dbRun(["files"], "readonly", (f) => req(f.get(id)));
   const saveBook = (meta, data) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.put(meta); f.put({ id: meta.id, data }); });
-  const getPdfOcr = (bookId, pageNo) =>
-    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":v5:" + pageNo)));
-  const putPdfOcr = (bookId, pageNo, value) =>
-    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":v5:" + pageNo }); });
   const deleteBook = (id) =>
-    dbRun(["meta", "files", "pdfocr"], "readwrite", (m, f, o) => {
-      m.delete(id); f.delete(id);
-      const all = o.getAll();
-      all.onsuccess = () => all.result.filter((entry) => entry.id.startsWith(id + ":")).forEach((entry) => o.delete(entry.id));
-    });
+    dbRun(["meta", "files"], "readwrite", (m, f) => { m.delete(id); f.delete(id); });
 
   /* ---------- Settings & per-book data ---------- */
   const store = {
@@ -70,7 +60,6 @@
   let fontIdx = store.get("fontIdx", 0);
   let lineH = store.get("lineH", 0); // 0 = book default, otherwise e.g. 1.6
   let pdfZoom = store.get("pdfZoom", 1);
-  let forcedImageRead = store.get("forcedImageRead", false) === true;
   let helperEnabled = store.get("helperEnabled", false);
   let dictionaryEnabled = store.get("dictionaryEnabled", true);
   let helperMode = store.get("helperMode", "underline");
@@ -124,7 +113,6 @@
   let book = null, rendition = null, current = null, saveTimer = null;
   let pdf = null, pdfPage = 1, pdfNum = 0, pdfToken = 0, pdfRender = null;
   let pdfObserver = null, pdfPageNodes = new Map(), pdfRendered = new Set(), pdfPageScale = 1, pdfScrollTimer = null;
-  let pdfOcrNoticeShown = false;
   let tocFlat = [];
   let bookmarks = [], anns = [];
   let pendingSel = null, editingId = null, notesTab = "bm";
@@ -497,7 +485,6 @@
     $("lh-label").textContent = lineH ? lineH.toFixed(1) : "Default";
     $("zoom-range").value = Math.round(pdfZoom * 100); $("zoom-label").textContent = Math.round(pdfZoom * 100) + "%";
     $("helper-mode").value = helperMode;
-    $("forced-image-read").checked = forcedImageRead;
     $("helper-left-words").value = helperLeftWords;
     $("helper-right-words").value = helperRightWords;
     updateHelperRangeLabels();
@@ -517,21 +504,6 @@
       store.set("helperRightWords", helperRightWords);
       updateHelperRangeLabels();
       helperDocs.forEach(clearHelperDoc);
-    });
-    $("forced-image-read").addEventListener("change", async (e) => {
-      forcedImageRead = e.target.checked;
-      store.set("forcedImageRead", forcedImageRead);
-      if (mode !== "pdf" || !pdf) return;
-      const doc = pdf;
-      const page = pdfPage;
-      try {
-        await setupContinuousPdf();
-        if (doc !== pdf) return;
-        await renderPdfPage(page);
-        if (doc === pdf) pdfGo(page);
-      } catch (err) {
-        if (doc === pdf) openFailed(err);
-      }
     });
     $("helper-mode").addEventListener("change", (e) => {
       helperMode = e.target.value; store.set("helperMode", helperMode);
@@ -595,7 +567,6 @@
     const isPdf = mode === "pdf", isArticle = mode === "article";
     ["font-field", "size-field", "lh-field"].forEach((id) => ($(id).hidden = isPdf));
     $("zoom-field").hidden = !isPdf;
-    $("forced-image-read-field").hidden = !isPdf;
     $("book-theme-field").hidden = isPdf || isArticle;
     $("epub-sheet").hidden = isPdf || isArticle;
     $("pdfview").hidden = !isPdf;
@@ -1092,7 +1063,6 @@
     } catch (e) { if (current === meta) openFailed(e); return; }
     if (current !== meta) { try { pdf.destroy(); } catch {} return; }
     pdfNum = pdf.numPages;
-    pdfOcrNoticeShown = false;
     const saved = store.get("pos:" + meta.id, null);
     pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
     const doc = pdf;
@@ -1152,128 +1122,6 @@
     updatePdfUI();
   }
 
-  /* ---------- OCR fallback for scanned PDF pages ---------- */
-  let pdfOcrWorkerPromise = null;
-  async function getPdfOcrWorker() {
-    if (pdfOcrWorkerPromise) return pdfOcrWorkerPromise;
-    pdfOcrWorkerPromise = (async () => {
-      if (!window.Tesseract) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-          script.onload = resolve;
-          script.onerror = () => reject(new Error("Could not load OCR. Check your internet connection and try again."));
-          document.head.appendChild(script);
-        });
-      }
-      return window.Tesseract.createWorker("tgl+eng", 1, {
-        workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
-        corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0",
-        langPath: "https://tessdata.projectnaptha.com/4.0.0"
-      });
-    })().catch((error) => { pdfOcrWorkerPromise = null; throw error; });
-    return pdfOcrWorkerPromise;
-  }
-
-  async function recognizeScannedPdfPage(doc, pageNo, canvas) {
-    if (!current || doc !== pdf) return null;
-    const cached = await getPdfOcr(current.id, pageNo);
-    if (cached && Array.isArray(cached.words)) return cached;
-    const worker = await getPdfOcrWorker();
-    if (doc !== pdf || !current) return null;
-
-    // These scans have a repeated "devilbat" watermark at the very bottom.
-    // Crop that strip out, enlarge the page, and boost grayscale contrast before OCR.
-    const scale = 2.5;
-    const cropBottom = Math.max(0, Math.floor(canvas.height * 0.055));
-    const sourceHeight = Math.max(1, canvas.height - cropBottom);
-    const processed = document.createElement("canvas");
-    processed.width = Math.max(1, Math.round(canvas.width * scale));
-    processed.height = Math.max(1, Math.round(sourceHeight * scale));
-    const ctx = processed.getContext("2d", { willReadFrequently: true });
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, processed.width, processed.height);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(canvas, 0, 0, canvas.width, sourceHeight, 0, 0, processed.width, processed.height);
-    const image = ctx.getImageData(0, 0, processed.width, processed.height);
-    const pixels = image.data;
-    for (let i = 0; i < pixels.length; i += 4) {
-      const gray = Math.round(pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114);
-      // Stretch the faded ink while keeping the paper background white.
-      const enhanced = gray < 205 ? Math.max(0, Math.round((gray - 205) * 1.55 + 205)) : 255;
-      pixels[i] = pixels[i + 1] = pixels[i + 2] = enhanced;
-      pixels[i + 3] = 255;
-    }
-    ctx.putImageData(image, 0, 0);
-
-    const result = await worker.recognize(processed);
-    if (doc !== pdf || !current) return null;
-    const words = (result.data.words || []).filter((word) =>
-      word.text && word.bbox && (word.confidence == null || word.confidence >= 22)
-    ).map((word) => ({
-      text: String(word.text),
-      confidence: Number(word.confidence || 0),
-      // Convert processed-canvas coordinates back to the original page canvas.
-      bbox: {
-        x0: word.bbox.x0 / scale, y0: word.bbox.y0 / scale,
-        x1: word.bbox.x1 / scale, y1: word.bbox.y1 / scale
-      }
-    })).filter((word) => word.bbox.y1 < sourceHeight);
-    const payload = { width: canvas.width, height: canvas.height, words };
-    await putPdfOcr(current.id, pageNo, payload);
-    return payload;
-  }
-
-  function addOcrWordsToTextLayer(textLayer, words, scaleX, scaleY) {
-    const fragment = document.createDocumentFragment();
-    const measure = document.createElement("canvas").getContext("2d");
-    words.forEach((word) => {
-      const text = String(word.text || "").trim(), box = word.bbox;
-      if (!text || !box) return;
-      const left = box.x0 * scaleX, top = box.y0 * scaleY;
-      const width = Math.max(1, (box.x1 - box.x0) * scaleX);
-      const height = Math.max(5, (box.y1 - box.y0) * scaleY);
-      const fontSize = height * 0.82;
-      const span = document.createElement("span");
-      span.textContent = text + " ";
-      span.dataset.ocr = "1";
-      // Match the OCR word's measured image box. Keep the unscaled text width
-      // as the CSS width, then compress/expand it exactly once to the OCR box.
-      measure.font = fontSize + "px Arial";
-      const naturalWidth = Math.max(1, measure.measureText(text + " ").width);
-      span.style.color = "transparent";
-      span.style.background = "transparent";
-      span.style.textShadow = "none";
-      span.style.left = left + "px";
-      span.style.top = (top - (height - fontSize) * 0.5) + "px";
-      span.style.height = height + "px";
-      span.style.fontSize = fontSize + "px";
-      span.style.lineHeight = height + "px";
-      span.style.width = naturalWidth + "px";
-      span.style.transform = "scaleX(" + (width / naturalWidth) + ")";
-      span.style.transformOrigin = "left top";
-      fragment.appendChild(span);
-    });
-    textLayer.appendChild(fragment);
-  }
-
-  async function addScannedPdfTextLayer(doc, pageNo, canvas, textLayer, viewport, textContent) {
-    const existingChars = (textContent.items || []).reduce((sum, item) =>
-      sum + String(item.str || "").trim().length, 0);
-    if ((!forcedImageRead && existingChars >= 20) || !current || doc !== pdf || !textLayer.isConnected) return;
-    if (!pdfOcrNoticeShown) {
-      pdfOcrNoticeShown = true;
-      toast(forcedImageRead ? "Forced image reading is on. Recognizing page text…" : "Scanned page detected. Preparing selectable text…");
-    }
-    const ocr = await recognizeScannedPdfPage(doc, pageNo, canvas);
-    if (!ocr || doc !== pdf || !textLayer.isConnected) return;
-    // In forced mode, discard the PDF's embedded text (which may only be a watermark)
-    // and use text recognized from the visible page image instead.
-    if (forcedImageRead) textLayer.replaceChildren();
-    addOcrWordsToTextLayer(textLayer, ocr.words, viewport.width / ocr.width, viewport.height / ocr.height);
-  }
-
   async function renderPdfPage(n) {
     if (!pdf || pdfRendered.has(n)) return;
     const doc = pdf, wrap = pdfPageNodes.get(n);
@@ -1298,9 +1146,6 @@
       const tc = await page.getTextContent();
       if (doc !== pdf) return;
       await pdfjsLib.renderTextLayer({ textContentSource: tc, container: tl, viewport: vp, textDivs: [] }).promise;
-      // Original scanned page stays visible; OCR supplies an invisible selectable text layer.
-      try { await addScannedPdfTextLayer(doc, n, canvas, tl, vp, tc); }
-      catch (ocrError) { console.warn("OCR failed on PDF page " + n + ":", ocrError); }
       addPdfReferenceLinks(doc, wrap, tl, n);
       drawPdfHighlights(n, wrap);
       const annotations = await page.getAnnotations();
@@ -2316,18 +2161,7 @@
           if (doc !== pdf) return;
           const page = await doc.getPage(pageNo);
           const text = await page.getTextContent();
-          let words = text.items.map((x) => x.str || "").join(" ");
-          if (words.replace(/\\s/g, "").length < 20) {
-            let ocr = await getPdfOcr(current.id, pageNo);
-            if (!ocr) {
-              const viewport = page.getViewport({ scale: 1.5 });
-              const canvas = document.createElement("canvas");
-              canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
-              await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-              ocr = await recognizeScannedPdfPage(doc, pageNo, canvas);
-            }
-            if (ocr) words = ocr.words.map((word) => word.text).join(" ");
-          }
+          const words = text.items.map((x) => x.str || "").join(" ");
           const lower = words.toLocaleLowerCase();
           let at = 0;
           while ((at = lower.indexOf(query.toLocaleLowerCase(), at)) !== -1) {
