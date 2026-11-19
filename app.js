@@ -113,6 +113,7 @@
   let book = null, rendition = null, current = null, saveTimer = null;
   let pdf = null, pdfPage = 1, pdfNum = 0, pdfToken = 0, pdfRender = null;
   let pdfObserver = null, pdfPageNodes = new Map(), pdfRendered = new Set(), pdfPageScale = 1, pdfScrollTimer = null;
+  let pdfIsScanned = false, pdfTextMode = false, ocrPages = null, ocrWorker = null, ocrBusy = false;
   let tocFlat = [];
   let bookmarks = [], anns = [];
   let pendingSel = null, editingId = null, notesTab = "bm";
@@ -573,6 +574,8 @@
     $("article-view").hidden = !isArticle;
     $("prev").hidden = isArticle; $("next").hidden = isArticle;
     $("article-export").hidden = !isArticle;
+    $("pdf-text-mode").hidden = !isPdf || !pdfIsScanned;
+    $("pdf-text-mode").textContent = pdfTextMode ? "▧ Scanned mode" : "Aa Text mode";
     ["bm-btn","notes-btn","toc-btn","settings-btn","helper-toggle","dictionary-toggle"].forEach(id => { $(id).hidden = isArticle; });
     $("settings-title").textContent = isPdf ? "PDF settings" : "Text settings";
   }
@@ -895,6 +898,9 @@
     rendition = null; book = null; pdf = null; pdfRender = null; pdfNum = 0; pdfPage = 1;
     if (pdfObserver) pdfObserver.disconnect(); pdfObserver = null;
     pdfPageNodes.clear(); pdfRendered.clear(); clearTimeout(pdfScrollTimer);
+    pdfIsScanned = false; pdfTextMode = false; ocrPages = null; ocrBusy = false;
+    if (ocrWorker) { try { ocrWorker.terminate(); } catch {} ocrWorker = null; }
+    $("pdf-text-mode").hidden = true; $("pdfpage").hidden = false; $("ocr-text-view").hidden = true; $("ocr-text-view").innerHTML = "";
     pdfReferenceMap = new Map();
     pdfAuthorYearMap = new Map();
     current = null; mode = null; tocFlat = []; bookmarks = []; anns = [];
@@ -1063,6 +1069,8 @@
     } catch (e) { if (current === meta) openFailed(e); return; }
     if (current !== meta) { try { pdf.destroy(); } catch {} return; }
     pdfNum = pdf.numPages;
+    pdfIsScanned = false; pdfTextMode = false; ocrPages = null;
+    $("pdf-text-mode").hidden = true;
     const saved = store.get("pos:" + meta.id, null);
     pdfPage = Math.min(Math.max((saved && saved.page) || 1, 1), pdfNum);
     const doc = pdf;
@@ -1083,10 +1091,117 @@
       await renderPdfPage(pdfPage);
       pdfGo(pdfPage);
       startStatsSession();
+      detectScannedPdf(doc, meta.id).catch((error) => console.warn("PDF scan detection failed:", error));
       hideLoading();
     } catch (e) {
       if (current === meta) openFailed(e);
     }
+  }
+
+  async function detectScannedPdf(doc, bookId) {
+    let chars = 0, pagesWithText = 0;
+    for (let n = 1; n <= doc.numPages; n++) {
+      if (doc !== pdf) return;
+      const page = await doc.getPage(n);
+      const content = await page.getTextContent();
+      const count = content.items.reduce((sum, item) => sum + (item.str || "").replace(/\s/g, "").length, 0);
+      chars += count;
+      if (count >= 20) pagesWithText++;
+      if (n % 12 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    if (doc !== pdf) return;
+    // Treat a PDF as scanned when it has almost no usable text across its pages.
+    pdfIsScanned = chars < Math.max(40, doc.numPages * 20) || pagesWithText < Math.max(1, Math.ceil(doc.numPages * 0.15));
+    if (pdfIsScanned) {
+      $("pdf-text-mode").hidden = false;
+      const cached = await getFile("ocr:" + bookId);
+      if (cached && Array.isArray(cached.data) && cached.data.length === doc.numPages) ocrPages = cached.data;
+      $("pdf-text-mode").textContent = pdfTextMode ? "▧ Scanned mode" : "Aa Text mode";
+    }
+  }
+
+  async function loadOcrLibrary() {
+    if (window.Tesseract) return;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("OCR engine couldn't load. Check your internet connection and try again."));
+      document.head.appendChild(script);
+    });
+    if (!window.Tesseract) throw new Error("OCR engine did not initialize.");
+  }
+
+  async function buildOcrTextMode() {
+    if (!pdf || !current || ocrBusy) return;
+    if (ocrPages) { showOcrTextPages(); return; }
+    ocrBusy = true;
+    const doc = pdf, bookId = current.id;
+    try {
+      toast("Loading OCR engine…");
+      await loadOcrLibrary();
+      if (doc !== pdf) return;
+      ocrWorker = await Tesseract.createWorker("eng", 1);
+      const pages = [];
+      for (let n = 1; n <= doc.numPages; n++) {
+        if (doc !== pdf) return;
+        toast("Recognizing text · page " + n + " of " + doc.numPages);
+        const page = await doc.getPage(n);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        const result = await ocrWorker.recognize(canvas);
+        pages.push((result.data && result.data.text || "").trim());
+        canvas.width = 0; canvas.height = 0;
+      }
+      if (doc !== pdf) return;
+      ocrPages = pages;
+      await dbRun(["files"], "readwrite", (files) => { files.put({ id: "ocr:" + bookId, data: pages }); });
+      showOcrTextPages();
+      toast("Text mode is ready. Your scanned PDF is unchanged.");
+    } catch (error) {
+      console.error("OCR failed:", error);
+      toast(error.message || "OCR couldn't complete. Please try again.");
+    } finally {
+      if (ocrWorker) { try { await ocrWorker.terminate(); } catch {} ocrWorker = null; }
+      ocrBusy = false;
+    }
+  }
+
+  function showOcrTextPages() {
+    const root = $("ocr-text-view");
+    root.innerHTML = "";
+    (ocrPages || []).forEach((text, index) => {
+      const page = document.createElement("article");
+      page.className = "ocr-page";
+      page.dataset.page = index + 1;
+      const content = document.createElement("div");
+      content.className = "ocr-page-text";
+      content.textContent = text || "[No text could be recognized on this page.]";
+      page.appendChild(content);
+      root.appendChild(page);
+    });
+    $("pdfpage").hidden = true;
+    root.hidden = false;
+    pdfTextMode = true;
+    $("pdf-text-mode").textContent = "▧ Scanned mode";
+    root.scrollTop = 0;
+  }
+
+  function showScannedPdf() {
+    $("ocr-text-view").hidden = true;
+    $("pdfpage").hidden = false;
+    pdfTextMode = false;
+    $("pdf-text-mode").textContent = "Aa Text mode";
+    pdfGo(pdfPage);
+  }
+
+  async function togglePdfTextMode() {
+    if (!pdfIsScanned) return;
+    if (pdfTextMode) showScannedPdf();
+    else await buildOcrTextMode();
   }
 
   async function setupContinuousPdf() {
@@ -2226,6 +2341,7 @@
     e.target.value="";
   });
   $("article-export").addEventListener("click", exportArticlePdf);
+  $("pdf-text-mode").addEventListener("click", togglePdfTextMode);
   $("backup-export").addEventListener("click", exportAnnotationBackup);
   $("backup-input").addEventListener("change", (e) => {
     const file = e.target.files && e.target.files[0];
