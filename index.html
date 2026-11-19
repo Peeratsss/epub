@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap">
-  <link rel="stylesheet" href="style.css?v=20261119-ocr1">
+  <link rel="stylesheet" href="style.css?v=20261118-article1">
 </head>
 <body data-theme="light">
 
@@ -81,7 +81,6 @@
         <button id="settings-btn" class="btn" title="Text settings">Aa</button>
         <button id="helper-toggle" class="btn helper-toggle" type="button" title="Turn Reading Helper on or off" aria-pressed="false">◎ Helper</button>
 <button id="dictionary-toggle" class="btn dictionary-toggle" type="button" title="Turn word lookup on or off" aria-pressed="true">⌕ Lookup: On</button>
-        <button id="pdf-text-mode" class="btn" type="button" hidden title="Switch between the original scan and OCR text">Aa Text mode</button>
         <button id="article-export" class="btn" type="button" hidden title="Export article as PDF">↓ PDF</button>
       </div>
     </header>
@@ -102,7 +101,7 @@
       <button id="prev" class="nav" aria-label="Previous page">‹</button>
       <div id="article-view" hidden></div>
       <div id="epub-sheet"><div id="viewer"></div></div>
-      <div id="pdfview" hidden><div id="pdfpage"></div><div id="ocr-text-view" hidden></div></div>
+      <div id="pdfview" hidden><div id="pdfpage"></div></div>
       <button id="next" class="nav" aria-label="Next page">›</button>
       <div id="loading" hidden>Opening book…</div>
 
@@ -309,7 +308,7 @@
       }
 
       const app = document.createElement("script");
-      app.src = "app.js?v=20261119-ocr1";
+      app.src = "app.js?v=20261118-rename1";
       document.body.appendChild(app);
     })();
   </script>
