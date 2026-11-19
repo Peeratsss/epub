@@ -33,9 +33,9 @@
   const saveBook = (meta, data) =>
     dbRun(["meta", "files"], "readwrite", (m, f) => { m.put(meta); f.put({ id: meta.id, data }); });
   const getPdfOcr = (bookId, pageNo) =>
-    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":" + pageNo)));
+    dbRun(["pdfocr"], "readonly", (s) => req(s.get(bookId + ":v2:" + pageNo)));
   const putPdfOcr = (bookId, pageNo, value) =>
-    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":" + pageNo }); });
+    dbRun(["pdfocr"], "readwrite", (s) => { s.put({ ...value, id: bookId + ":v2:" + pageNo }); });
   const deleteBook = (id) =>
     dbRun(["meta", "files", "pdfocr"], "readwrite", (m, f, o) => {
       m.delete(id); f.delete(id);
@@ -1163,14 +1163,45 @@
     if (cached && Array.isArray(cached.words)) return cached;
     const worker = await getPdfOcrWorker();
     if (doc !== pdf || !current) return null;
-    const result = await worker.recognize(canvas);
+
+    // These scans have a repeated "devilbat" watermark at the very bottom.
+    // Crop that strip out, enlarge the page, and boost grayscale contrast before OCR.
+    const scale = 2.5;
+    const cropBottom = Math.max(0, Math.floor(canvas.height * 0.055));
+    const sourceHeight = Math.max(1, canvas.height - cropBottom);
+    const processed = document.createElement("canvas");
+    processed.width = Math.max(1, Math.round(canvas.width * scale));
+    processed.height = Math.max(1, Math.round(sourceHeight * scale));
+    const ctx = processed.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, processed.width, processed.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(canvas, 0, 0, canvas.width, sourceHeight, 0, 0, processed.width, processed.height);
+    const image = ctx.getImageData(0, 0, processed.width, processed.height);
+    const pixels = image.data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const gray = Math.round(pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114);
+      // Stretch the faded ink while keeping the paper background white.
+      const enhanced = gray < 205 ? Math.max(0, Math.round((gray - 205) * 1.55 + 205)) : 255;
+      pixels[i] = pixels[i + 1] = pixels[i + 2] = enhanced;
+      pixels[i + 3] = 255;
+    }
+    ctx.putImageData(image, 0, 0);
+
+    const result = await worker.recognize(processed);
     if (doc !== pdf || !current) return null;
     const words = (result.data.words || []).filter((word) =>
-      word.text && word.bbox && (word.confidence == null || word.confidence >= 18)
+      word.text && word.bbox && (word.confidence == null || word.confidence >= 22)
     ).map((word) => ({
-      text: String(word.text), confidence: Number(word.confidence || 0),
-      bbox: { x0: word.bbox.x0, y0: word.bbox.y0, x1: word.bbox.x1, y1: word.bbox.y1 }
-    }));
+      text: String(word.text),
+      confidence: Number(word.confidence || 0),
+      // Convert processed-canvas coordinates back to the original page canvas.
+      bbox: {
+        x0: word.bbox.x0 / scale, y0: word.bbox.y0 / scale,
+        x1: word.bbox.x1 / scale, y1: word.bbox.y1 / scale
+      }
+    })).filter((word) => word.bbox.y1 < sourceHeight);
     const payload = { width: canvas.width, height: canvas.height, words };
     await putPdfOcr(current.id, pageNo, payload);
     return payload;
