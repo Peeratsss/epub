@@ -26,7 +26,7 @@
       </div>
       <button id="add-url" class="btn" type="button">↗ Add URL</button>
       <button id="add-html" class="btn" type="button">＋ Add HTML</button>
-      <input id="html-input" type="file" accept=".html,.htm,text/html" webkitdirectory directory multiple hidden>
+      <input id="html-input" type="file" accept=".html,.htm,text/html,image/*" multiple hidden>
       <label class="btn primary add-book"><span>＋</span> Add book
         <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
       </label>
@@ -308,7 +308,7 @@
       }
 
       const app = document.createElement("script");
-      app.src = "app.js?v=20261119-db-fix";
+      app.src = "app.js?v=20261120-html-file-picker";
       document.body.appendChild(app);
     })();
   </script>
