@@ -621,7 +621,7 @@
       if(src && assetMap && htmlPath && !/^(https?:|data:|blob:)/i.test(src)){
         try{
           const dir=htmlPath.split("/").slice(0,-1).join("/");
-          const path=decodeURIComponent(new URL(src,"https://local.invalid/"+dir+"/").pathname).replace(/^\//,"");
+          const path=normalizeAssetPath(new URL(src,"https://local.invalid/"+dir+"/").pathname);
           const embedded=assetMap.get(path);
           if(embedded){img.setAttribute("src",embedded);resolved=true;}
         }catch{}
@@ -661,7 +661,8 @@
     toast("Reading webpage and images…");
     try{
       const allFiles=Array.from(selectedFiles||[file]);
-      const relativePath=f=>(f.webkitRelativePath||f.name).split("/").slice(f.webkitRelativePath?1:0).join("/");
+      const normalizeAssetPath=value=>decodeURIComponent(String(value||"").replace(/\\/g,"/")).replace(/^\.\//,"").replace(/^\/+|\/+$/g,"").toLocaleLowerCase();
+      const relativePath=f=>normalizeAssetPath((f.webkitRelativePath||f.name).split("/").slice(f.webkitRelativePath?1:0).join("/"));
       const imageFiles=allFiles.filter(f=>/^image\//i.test(f.type)||/\.(jpe?g|png|gif|webp|svg|avif|bmp)$/i.test(f.name));
       const assetMap=new Map();let embeddedBytes=0;
       for(const imageFile of imageFiles){
@@ -2219,13 +2220,16 @@
   $("file-input").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
   $("add-url").addEventListener("click", importArticleUrl);
   $("add-html").addEventListener("click", () => $("html-input").click());
-  $("html-input").addEventListener("change", (e) => {
-    const files=Array.from(e.target.files||[]);
+  $("add-html-folder").addEventListener("click", () => $("html-folder-input").click());
+  const handleHtmlFiles = (input) => {
+    const files=Array.from(input.files||[]);
     const file=files.find(f=>/\.html?$/i.test(f.name));
     if(file) importArticleHtml(file,files);
-    else if(files.length)toast("Choose the .html file inside the saved webpage folder.");
-    e.target.value="";
-  });
+    else if(files.length)toast("No HTML file was found in that selection.");
+    input.value="";
+  };
+  $("html-input").addEventListener("change", (e) => handleHtmlFiles(e.target));
+  $("html-folder-input").addEventListener("change", (e) => handleHtmlFiles(e.target));
   $("article-export").addEventListener("click", exportArticlePdf);
   $("backup-export").addEventListener("click", exportAnnotationBackup);
   $("backup-input").addEventListener("change", (e) => {
