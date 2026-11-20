@@ -604,6 +604,7 @@
   }
 
   /* ---------- URL article import ---------- */
+  const normalizeAssetPath = value => decodeURIComponent(String(value || "").replace(/\\/g, "/")).replace(/^\.\//, "").replace(/^\/+|\/+$/g, "").toLocaleLowerCase();
   function cleanArticleHtml(rawHtml, pageUrl, assetMap, htmlPath) {
     const parsed = new DOMParser().parseFromString(rawHtml, "text/html");
     const junkSelectors = ["script","style","noscript","iframe","svg","form","button","input","select","textarea","nav","header","footer","aside","[role=navigation]","[role=banner]","[role=contentinfo]","[aria-label*=advert i]","[class*=advert i]","[id*=advert i]","[class*=promo i]","[class*=banner i]","[class*=social i]","[class*=share i]","[class*=newsletter i]","[class*=subscribe i]","[class*=related i]","[class*=recommend i]","[class*=recent i]","[class*=cookie i]","[class*=popup i]","[class*=modal i]","[class*=breadcrumb i]"];
@@ -661,7 +662,6 @@
     toast("Reading webpage and images…");
     try{
       const allFiles=Array.from(selectedFiles||[file]);
-      const normalizeAssetPath=value=>decodeURIComponent(String(value||"").replace(/\\/g,"/")).replace(/^\.\//,"").replace(/^\/+|\/+$/g,"").toLocaleLowerCase();
       const relativePath=f=>normalizeAssetPath((f.webkitRelativePath||f.name).split("/").slice(f.webkitRelativePath?1:0).join("/"));
       const imageFiles=allFiles.filter(f=>/^image\//i.test(f.type)||/\.(jpe?g|png|gif|webp|svg|avif|bmp)$/i.test(f.name));
       const assetMap=new Map();let embeddedBytes=0;
