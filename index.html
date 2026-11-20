@@ -25,8 +25,10 @@
         <input id="backup-input" type="file" accept=".json,application/json" hidden>
       </div>
       <button id="add-url" class="btn" type="button">↗ Add URL</button>
-      <button id="add-html" class="btn" type="button">＋ Add HTML</button>
+      <button id="add-html" class="btn" type="button">＋ Add HTML File</button>
+      <button id="add-html-folder" class="btn" type="button">＋ Add HTML Folder</button>
       <input id="html-input" type="file" accept=".html,.htm,text/html,image/*" multiple hidden>
+      <input id="html-folder-input" type="file" accept=".html,.htm,text/html,image/*" webkitdirectory directory multiple hidden>
       <label class="btn primary add-book"><span>＋</span> Add book
         <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
       </label>
@@ -308,7 +310,7 @@
       }
 
       const app = document.createElement("script");
-      app.src = "app.js?v=20261120-html-folder-images";
+      app.src = "app.js?v=20261120-html-folder-fix";
       document.body.appendChild(app);
     })();
   </script>
